@@ -107,7 +107,7 @@ def check_data_consistency(pars, el_struct):
 # generate_plo()
 #
 ################################################################################
-def generate_plo(conf_pars, el_struct):
+def generate_plo(conf_pars, el_struct, print_projector_diagnostics=True):
     """
     Parameters
     ----------
@@ -156,43 +156,44 @@ def generate_plo(conf_pars, el_struct):
             #from h5 import HDFArchive
             #with HDFArchive(testout, 'w') as h5test:
             #    h5test['hk'] = pgroup.hk
-# DEBUG output
-        print("Density matrix:")
-        nimp = 0.0
-        ov_all = []
-        for ish in pgroup.ishells:
-            if  not isinstance(pshells[pgroup.ishells[ish]],ComplementShell):
-                print("  Shell %i"%(ish + 1))
-                dm_all, ov_all_ = pshells[ish].density_matrix(el_struct)
-                ov_all.append(ov_all_[0])
-                spin_fac = 2 if dm_all.shape[0] == 1 else 1
-                for io in range(dm_all.shape[1]):
-                    print("    Site %i"%(io + 1))
-                    dm = spin_fac * dm_all[:, io, : ,:].sum(0)
-                    for row in dm:
-                        print(''.join(map("{0:14.7f}".format, row)))
-                    ndm = dm.trace()
-                    if pshells[ish].corr:
-                        nimp += ndm
-                    print("      trace: ", ndm)
-        print()
-        print("  Impurity density:", nimp)
-        print()
-        print("Overlap:")
-        for io, ov in enumerate(ov_all):
-            print("  Site %i"%(io + 1))
-            print(ov[0,...])
-        print()
-        print("Local Hamiltonian:")
-        for ish in pgroup.ishells:
-            if  not isinstance(pshells[pgroup.ishells[ish]],ComplementShell):
-                print("  Shell %i"%(ish + 1))
-                loc_ham = pshells[pgroup.ishells[ish]].local_hamiltonian(el_struct)
-                for io in range(loc_ham.shape[1]):
-                    print("    Site %i (real | complex part)"%(io + 1))
-                    for row in loc_ham[:, io, :, :].sum(0):
-                        print(''.join(map("{0:14.7f}".format, row.real))+' |'+''.join(map("{0:14.7f}".format, row.imag)))
-# END DEBUG output
+        if print_projector_diagnostics:
+            print("Density matrix:")
+            nimp = 0.0
+            ov_all = []
+            for ish in pgroup.ishells:
+                if  not isinstance(pshells[pgroup.ishells[ish]],ComplementShell):
+                    print("  Shell %i"%(ish + 1))
+                    dm_all, ov_all_ = pshells[ish].density_matrix(el_struct)
+                    ov_all.append(ov_all_[0])
+                    spin_fac = 2 if dm_all.shape[0] == 1 else 1
+                    for io in range(dm_all.shape[1]):
+                        print("    Site %i"%(io + 1))
+                        dm = spin_fac * dm_all[:, io, : ,:].sum(0)
+                        for row in dm:
+                            print(''.join(map("{0:14.7f}".format, row)))
+                        ndm = dm.trace()
+                        if pshells[ish].corr:
+                            nimp += ndm
+                        print("      trace: ", ndm)
+            print()
+            print("  Impurity density:", nimp)
+            print()
+            print("Overlap:")
+            for io, ov in enumerate(ov_all):
+                print("  Site %i"%(io + 1))
+                print(ov[0,...])
+            print()
+            print("Local Hamiltonian:")
+            for ish in pgroup.ishells:
+                if  not isinstance(pshells[pgroup.ishells[ish]],ComplementShell):
+                    print("  Shell %i"%(ish + 1))
+                    loc_ham = pshells[pgroup.ishells[ish]].local_hamiltonian(el_struct)
+                    for io in range(loc_ham.shape[1]):
+                        print("    Site %i (real | complex part)"%(io + 1))
+                        for row in loc_ham[:, io, :, :].sum(0):
+                            print(''.join(map("{0:14.7f}".format, row.real))+' |'+''.join(map("{0:14.7f}".format, row.imag)))
+        else:
+            print("  Skipping density matrix/local Hamiltonian diagnostics for this projector path.")
         if 'dosmesh' in conf_pars.general:
             print()
             print("Evaluating DOS...")

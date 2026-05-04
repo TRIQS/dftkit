@@ -31,6 +31,7 @@ from types import *
 import numpy
 from h5 import *
 from ..converter_tools import *
+import os
 import os.path
 try:
     import simplejson as json
@@ -139,7 +140,10 @@ class Converter(ConverterTools):
 
     def convert_dft_input(self):
         """
-        Reads the input files, and stores the data in the HDFfile
+        Reads the input files, and stores the data in the HDFfile.
+
+        If KPOINTS_OPT projector data is detected in vaspout.h5, the bands
+        input is converted automatically by calling convert_bands_input().
         """
         energy_unit = 1.0 # VASP interface always uses eV
         k_dep_projection = 1
@@ -409,9 +413,359 @@ class Converter(ConverterTools):
         # Symmetries are used, so now convert symmetry information for *correlated* orbitals:
         self.convert_symmetry_input(ctrl_head, orbits=self.corr_shells, symm_subgrp=self.symmcorr_subgrp)
 
+        # Auto-convert KPOINTS_OPT band/projector data when available.
+        vaspout_candidates = [
+            os.path.join(self.basename, 'vaspout.h5'),
+            os.path.join(os.path.dirname(self.basename), 'vaspout.h5')
+        ]
+        kpoints_opt_found = False
+        for candidate in vaspout_candidates:
+            if not os.path.exists(candidate):
+                continue
+            try:
+                with HDFArchive(candidate, 'r') as ar:
+                    _ = ar['results/electron_eigenvalues_kpoints_opt/eigenvalues']
+                    _ = ar['results/locproj_opt/data']
+                kpoints_opt_found = True
+                break
+            except KeyError:
+                continue
+
+        if kpoints_opt_found:
+            mpi.report("Detected KPOINTS_OPT band data in %s. Converting %s..." % (candidate, self.bands_subgrp))
+            self.convert_bands_input()
+
 # TODO: Implement misc_input
 #        self.convert_misc_input(bandwin_file=self.bandwin_file,struct_file=self.struct_file,outputs_file=self.outputs_file,
 #                                misc_subgrp=self.misc_subgrp,SO=self.SO,SP=self.SP,n_k=self.n_k)
+
+
+    def convert_bands_input(self, cfg_filename=None):
+        """
+        Reads KPOINTS_OPT band and projector data from vaspout.h5 and stores
+        it in the bands_subgrp in the hdf5 archive.
+
+        The PLO config is required so shell transforms, energy windows, and
+        orthonormalization are applied via the same PLOVasp path as for
+        convert_dft_input().
+
+        This routine requires that convert_dft_input() has been called first,
+        because correlated shell definitions are taken from dft_subgrp.
+        """
+
+        def _decode_string(value):
+            if isinstance(value, bytes):
+                return value.decode('ascii').strip()
+            return str(value).strip()
+
+        mpi.report("Processing VASP KPOINTS_OPT band/projector data...")
+
+        def _to_complex(array):
+            arr = numpy.array(array)
+            if arr.shape and arr.shape[-1] == 2:
+                return arr[..., 0] + 1j * arr[..., 1]
+            return arr.astype(complex)
+
+        def _locproj_to_canonical(locproj_data, locproj_format):
+            format_raw = locproj_format.strip()
+            if not (format_raw.startswith('[') and format_raw.endswith(']')):
+                raise IOError("convert_bands_input: Unexpected locproj_opt format string '%s'." % locproj_format)
+
+            axis_labels = [item.strip() for item in format_raw[1:-1].split(',') if item.strip()]
+            axis_to_index = {label: i for i, label in enumerate(axis_labels)}
+            required_axes = ['proj_index', 'spin_index', 'kpts_index', 'band_index']
+            if sorted(axis_to_index.keys()) != sorted(required_axes):
+                raise IOError("convert_bands_input: Unsupported locproj_opt axis labels '%s'." % axis_labels)
+
+            locproj_complex = _to_complex(locproj_data)
+            if locproj_complex.ndim != len(axis_labels):
+                raise IOError("convert_bands_input: Unsupported locproj_opt data rank %i." % locproj_complex.ndim)
+
+            perm = [axis_to_index[name] for name in required_axes]
+            return numpy.transpose(locproj_complex, axes=perm)
+
+        def _label_to_l_m(label, iproj, nc_flag):
+            orb_labels = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2",
+                          "fy(3x2-y2)", "fxyz", "fyz2", "fz3", "fxz2", "fz(x2-y2)", "fx(x2-3y2)"]
+            if label not in orb_labels:
+                raise IOError("convert_bands_input: Unknown LOCPROJ orbital label '%s'." % label)
+            lm = orb_labels.index(label)
+            l = int(numpy.sqrt(lm))
+            m = lm - l * l
+            if nc_flag:
+                if (iproj % 2) == 0:
+                    m = 2 * m
+                else:
+                    m = 2 * m + 1
+            return l, m
+
+        def _find_cfg_path(user_cfg_filename):
+            if user_cfg_filename is not None:
+                return user_cfg_filename
+            cfg_candidates = [
+                self.basename + '.cfg',
+                os.path.join(os.path.dirname(self.basename), 'plo.cfg')
+            ]
+            for candidate in cfg_candidates:
+                if os.path.exists(candidate):
+                    return candidate
+            return None
+
+        def _build_from_plovasp(cfg_path, eigvals_raw, fermiweights_raw, kpoint_coords, kpoint_weights,
+                                locproj_raw, proj_sites_raw, proj_labels_raw, nc_flag, efermi):
+            from .plovasp.inpconf import ConfigParameters
+            from .plovasp.plotools import generate_plo
+
+            class _BandsElStruct:
+                pass
+
+            eigvals = numpy.array(eigvals_raw)
+            if eigvals.ndim == 2:
+                eigvals = eigvals[numpy.newaxis, :, :]
+            ferw = numpy.array(fermiweights_raw)
+            if ferw.ndim == 2:
+                ferw = ferw[numpy.newaxis, :, :]
+
+            n_spin, n_k_loc, _ = eigvals.shape
+
+            proj_params = []
+            for ip in range(len(proj_labels_raw)):
+                l, m = _label_to_l_m(proj_labels_raw[ip], ip, nc_flag)
+                proj_params.append({'isite': int(proj_sites_raw[ip]), 'l': l, 'm': m})
+
+            natom = max(int(max(proj_sites_raw)), 1)
+            qcoords = numpy.zeros((natom, 3), dtype=float)
+            for ip in range(len(proj_sites_raw)):
+                iat = int(proj_sites_raw[ip]) - 1
+                if 0 <= iat < natom:
+                    qcoords[iat, :] = 0.0
+
+            kweights = numpy.array(kpoint_weights, dtype=float)
+            if kweights.shape[0] != n_k_loc:
+                raise IOError("convert_bands_input: k-point weights have incompatible shape %s." % (kweights.shape,))
+            wsum = kweights.sum()
+            if wsum > 0:
+                kweights = kweights / wsum
+            else:
+                kweights = numpy.full(n_k_loc, 1.0 / float(n_k_loc), dtype=float)
+
+            pars = ConfigParameters(cfg_path, verbosity=0)
+            pars.parse_input()
+            if 'dosmesh' in pars.general:
+                del pars.general['dosmesh']
+            efermi = pars.general.get('efermi', efermi)
+
+            el_struct = _BandsElStruct()
+            el_struct.natom = natom
+            el_struct.type_of_ion = [0 for _ in range(natom)]
+            el_struct.kmesh = {'nktot': n_k_loc, 'nkibz': n_k_loc, 'kpoints': kpoint_coords, 'kweights': kweights}
+            el_struct.nc_flag = nc_flag
+            el_struct.efermi = efermi
+            # generate_plo expects eigvals with shape [nk, nb, ns]
+            el_struct.eigvals = numpy.transpose(eigvals, (1, 2, 0))
+            # ferw is used as [spin, k, band]
+            el_struct.ferw = ferw
+            el_struct.proj_raw = locproj_raw
+            el_struct.proj_params = proj_params
+            el_struct.structure = {'qcoords': qcoords}
+
+            pshells, pgroups = generate_plo(pars, el_struct, print_projector_diagnostics=False)
+            if len(pgroups) != 1:
+                raise IOError("convert_bands_input: Exactly one PLO group is supported, found %i in %s." % (len(pgroups), cfg_path))
+
+            pgroup = pgroups[0]
+            ib_win = pgroup.ib_win
+            nspin_ib = ib_win.shape[1]
+
+            n_orbitals = numpy.zeros((n_k_loc, n_spin_blocs), dtype=int)
+            for isp in range(n_spin_blocs):
+                is_b = min(isp, nspin_ib - 1)
+                for ik in range(n_k_loc):
+                    ib1, ib2 = int(ib_win[ik, is_b, 0]), int(ib_win[ik, is_b, 1])
+                    n_orbitals[ik, isp] = ib2 - ib1 + 1
+
+            nb_max = int(numpy.max(n_orbitals))
+            hopping = numpy.zeros([n_k_loc, n_spin_blocs, nb_max, nb_max], complex)
+            eigvals_shifted = eigvals - efermi
+            for isp in range(n_spin_blocs):
+                is_b = min(isp, nspin_ib - 1)
+                is_e = min(isp, eigvals_shifted.shape[0] - 1)
+                for ik in range(n_k_loc):
+                    ib1, ib2 = int(ib_win[ik, is_b, 0]), int(ib_win[ik, is_b, 1])
+                    nb = ib2 - ib1 + 1
+                    for ib in range(nb):
+                        hopping[ik, isp, ib, ib] = eigvals_shifted[is_e, ik, ib1 + ib]
+
+            max_corr_dim = max([crsh['dim'] for crsh in self.corr_shells])
+            proj_mat = numpy.zeros([n_k_loc, n_spin_blocs, self.n_corr_shells, max_corr_dim, nb_max], complex)
+
+            for icrsh, crsh in enumerate(self.corr_shells):
+                shell_atom = int(crsh['atom']) - 1
+                shell_l = int(crsh['l'])
+                shell_dim = int(crsh['dim'])
+
+                matches = []
+                for ish, pshell in enumerate(pshells):
+                    if not pshell.corr:
+                        continue
+                    if int(pshell.lorb) != shell_l:
+                        continue
+                    if shell_atom not in pshell.ion_list:
+                        continue
+                    io = pshell.ion_list.index(shell_atom)
+                    if int(pshell.ndim) != shell_dim:
+                        continue
+                    matches.append((ish, io))
+
+                if len(matches) != 1:
+                    raise IOError("convert_bands_input: Could not uniquely match correlated shell %i (atom=%i, l=%i, dim=%i) to transformed PLO shells from %s." %
+                                  (icrsh, shell_atom + 1, shell_l, shell_dim, cfg_path))
+
+                ish, io = matches[0]
+                pshell = pshells[ish]
+                ns_proj = pshell.proj_win.shape[1]
+                for isp in range(n_spin_blocs):
+                    is_p = min(isp, ns_proj - 1)
+                    is_b = min(isp, nspin_ib - 1)
+                    for ik in range(n_k_loc):
+                        ib1, ib2 = int(ib_win[ik, is_b, 0]), int(ib_win[ik, is_b, 1])
+                        nb = ib2 - ib1 + 1
+                        proj_mat[ik, isp, icrsh, :shell_dim, :nb] = pshell.proj_win[io, is_p, ik, :shell_dim, :nb]
+
+            return n_orbitals, proj_mat, hopping
+
+        def _build_direct(eigvals_raw, efermi, kpoint_coords, locproj_canonical, proj_sites, proj_labels):
+
+            eigvals = numpy.array(eigvals_raw)
+            if eigvals.ndim == 2:
+                eigvals = eigvals[numpy.newaxis, :, :]
+            if eigvals.ndim != 3:
+                raise IOError("convert_bands_input: Unexpected eigenvalues shape %s." % (eigvals.shape,))
+
+            n_spin_eig, n_k_loc, n_bands = eigvals.shape
+            n_proj, n_spin_proj, n_k_proj, n_bands_proj = locproj_canonical.shape
+
+            if n_spin_eig != n_spin_blocs:
+                raise IOError("convert_bands_input: Spin mismatch between dft_input (%i) and KPOINTS_OPT eigenvalues (%i)." % (n_spin_blocs, n_spin_eig))
+            if n_spin_proj != n_spin_eig:
+                raise IOError("convert_bands_input: Spin mismatch between locproj_opt (%i) and eigenvalues (%i)." % (n_spin_proj, n_spin_eig))
+            if n_k_proj != n_k_loc:
+                raise IOError("convert_bands_input: k-point mismatch between locproj_opt (%i) and eigenvalues (%i)." % (n_k_proj, n_k_loc))
+            if n_bands_proj != n_bands:
+                raise IOError("convert_bands_input: Band mismatch between locproj_opt (%i) and eigenvalues (%i)." % (n_bands_proj, n_bands))
+            if kpoint_coords.shape[0] != n_k_loc:
+                raise IOError("convert_bands_input: kpoint_coords has %i entries but eigenvalues have %i k-points." % (kpoint_coords.shape[0], n_k_loc))
+
+            n_orbitals = numpy.full((n_k_loc, n_spin_blocs), n_bands, dtype=int)
+            hopping = numpy.zeros([n_k_loc, n_spin_blocs, n_bands, n_bands], complex)
+            for isp in range(n_spin_blocs):
+                for ik in range(n_k_loc):
+                    for ib in range(n_bands):
+                        hopping[ik, isp, ib, ib] = eigvals[isp, ik, ib] - efermi
+
+            proj_l = numpy.array([_label_to_l_m(label, ip, False)[0] for ip, label in enumerate(proj_labels)], dtype=int)
+
+            max_corr_dim = max([crsh['dim'] for crsh in self.corr_shells])
+            proj_mat = numpy.zeros([n_k_loc, n_spin_blocs, self.n_corr_shells, max_corr_dim, n_bands], complex)
+
+            for icrsh, crsh in enumerate(self.corr_shells):
+                shell_atom = int(crsh['atom'])
+                shell_l = int(crsh['l'])
+                shell_dim = int(crsh['dim'])
+
+                shell_proj_inds = [ip for ip in range(n_proj)
+                                   if int(proj_sites[ip]) == shell_atom and int(proj_l[ip]) == shell_l]
+
+                if len(shell_proj_inds) != shell_dim:
+                    raise IOError("convert_bands_input: Projector mismatch for shell %i (atom=%i, l=%i): expected dim=%i, found %i projectors in locproj_opt. Provide cfg_filename to apply TRANSFORM/NORMALIZE when needed." %
+                                  (icrsh, shell_atom, shell_l, shell_dim, len(shell_proj_inds)))
+
+                for isp in range(n_spin_blocs):
+                    for ik in range(n_k_loc):
+                        for ilm, iproj in enumerate(shell_proj_inds):
+                            proj_mat[ik, isp, icrsh, ilm, :] = locproj_canonical[iproj, isp, ik, :]
+
+            return n_orbitals, proj_mat, hopping
+
+        if not (mpi.is_master_node()):
+            return
+
+        # Read shell information from converter output
+        try:
+            with HDFArchive(self.hdf_file, 'r') as ar:
+                if not (self.dft_subgrp in ar):
+                    raise IOError("convert_bands_input: No %s subgroup in hdf file found! Call convert_dft_input first." % self.dft_subgrp)
+                things_to_read = ['SP', 'SO', 'n_corr_shells', 'corr_shells']
+                for it in things_to_read:
+                    if not hasattr(self, it):
+                        setattr(self, it, ar[self.dft_subgrp][it])
+        except KeyError:
+            raise IOError("convert_bands_input: Needed data not found in hdf file. Call convert_dft_input first.")
+
+        n_spin_blocs = 1 if int(self.SO) == 1 else int(self.SP) + 1
+
+        # Read KPOINTS_OPT data directly from vaspout.h5
+        vaspout_candidates = [
+            os.path.join(self.basename, 'vaspout.h5'),
+            os.path.join(os.path.dirname(self.basename), 'vaspout.h5')
+        ]
+        vaspout_h5 = None
+        for candidate in vaspout_candidates:
+            if os.path.exists(candidate):
+                vaspout_h5 = candidate
+                break
+        if vaspout_h5 is None:
+            raise IOError("convert_bands_input: Could not find vaspout.h5. Tried: %s" % vaspout_candidates)
+
+        try:
+            with HDFArchive(vaspout_h5, 'r') as ar:
+                eigvals = numpy.array(ar['results/electron_eigenvalues_kpoints_opt/eigenvalues'])
+                fermiweights = numpy.array(ar['results/electron_eigenvalues_kpoints_opt/fermiweights'])
+                kpoint_coords = numpy.array(ar['results/electron_eigenvalues_kpoints_opt/kpoint_coords'])
+                kpoint_weights = numpy.array(ar['results/electron_eigenvalues_kpoints_opt/kpoints_symmetry_weight'])
+                efermi = float(ar['results/electron_dos/efermi'])
+
+                locproj_data = numpy.array(ar['results/locproj_opt/data'])
+                locproj_format = _decode_string(ar['results/locproj_opt/format'])
+                lnoncollinear = bool(int(ar['results/locproj_opt/parameters/lnoncollinear']))
+                proj_sites = numpy.array(ar['results/locproj_opt/parameters/site'], dtype=int)
+                proj_labels_raw = numpy.array(ar['results/locproj_opt/parameters/ang_type'])
+                proj_labels = [_decode_string(lbl) for lbl in proj_labels_raw]
+        except KeyError as err:
+            raise IOError("convert_bands_input: Missing KPOINTS_OPT dataset in %s: %s" % (vaspout_h5, err))
+
+        locproj_canonical = _locproj_to_canonical(locproj_data, locproj_format)
+
+        if fermiweights.shape != eigvals.shape:
+            raise IOError("convert_bands_input: Fermi weights shape %s does not match eigenvalues shape %s." % (fermiweights.shape, eigvals.shape))
+
+        cfg_path = _find_cfg_path(cfg_filename)
+        if cfg_path is None:
+            raise IOError("convert_bands_input: Could not find the PLO config needed to convert KPOINTS_OPT consistently. Provide cfg_filename or place plo.cfg next to %s." % vaspout_h5)
+
+        n_orbitals, proj_mat, hopping = _build_from_plovasp(
+            cfg_path,
+            eigvals,
+            fermiweights,
+            kpoint_coords,
+            kpoint_weights,
+            locproj_canonical,
+            proj_sites,
+            proj_labels,
+            lnoncollinear,
+            efermi
+        )
+        n_k = kpoint_coords.shape[0]
+
+        n_parproj = numpy.array([0])
+        proj_mat_all = numpy.array([0])
+
+        with HDFArchive(self.hdf_file, 'a') as ar:
+            if not (self.bands_subgrp in ar):
+                ar.create_group(self.bands_subgrp)
+            things_to_save = ['n_k', 'n_orbitals', 'proj_mat', 'hopping', 'n_parproj', 'proj_mat_all']
+            for it in things_to_save:
+                ar[self.bands_subgrp][it] = locals()[it]
 
 
     def convert_misc_input(self, bandwin_file, struct_file, outputs_file, misc_subgrp, SO, SP, n_k):
