@@ -484,21 +484,6 @@ class Converter(ConverterTools):
             perm = [axis_to_index[name] for name in required_axes]
             return numpy.transpose(locproj_complex, axes=perm)
 
-        def _label_to_l_m(label, iproj, nc_flag):
-            orb_labels = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2",
-                          "fy(3x2-y2)", "fxyz", "fyz2", "fz3", "fxz2", "fz(x2-y2)", "fx(x2-3y2)"]
-            if label not in orb_labels:
-                raise IOError("convert_bands_input: Unknown LOCPROJ orbital label '%s'." % label)
-            lm = orb_labels.index(label)
-            l = int(numpy.sqrt(lm))
-            m = lm - l * l
-            if nc_flag:
-                if (iproj % 2) == 0:
-                    m = 2 * m
-                else:
-                    m = 2 * m + 1
-            return l, m
-
         def _find_cfg_path(user_cfg_filename):
             if user_cfg_filename is not None:
                 return user_cfg_filename
@@ -515,6 +500,7 @@ class Converter(ConverterTools):
                                 locproj_raw, proj_sites_raw, proj_labels_raw, nc_flag, efermi):
             from .plovasp.inpconf import ConfigParameters
             from .plovasp.plotools import generate_plo
+            from .plovasp.vaspio import label_to_l_m
 
             class _BandsElStruct:
                 pass
@@ -530,7 +516,7 @@ class Converter(ConverterTools):
 
             proj_params = []
             for ip in range(len(proj_labels_raw)):
-                l, m = _label_to_l_m(proj_labels_raw[ip], ip, nc_flag)
+                l, m = label_to_l_m(proj_labels_raw[ip], ip, nc_flag)
                 proj_params.append({'isite': int(proj_sites_raw[ip]), 'l': l, 'm': m})
 
             natom = max(int(max(proj_sites_raw)), 1)
@@ -631,59 +617,6 @@ class Converter(ConverterTools):
                         ib1, ib2 = int(ib_win[ik, is_b, 0]), int(ib_win[ik, is_b, 1])
                         nb = ib2 - ib1 + 1
                         proj_mat[ik, isp, icrsh, :shell_dim, :nb] = pshell.proj_win[io, is_p, ik, :shell_dim, :nb]
-
-            return n_orbitals, proj_mat, hopping
-
-        def _build_direct(eigvals_raw, efermi, kpoint_coords, locproj_canonical, proj_sites, proj_labels):
-
-            eigvals = numpy.array(eigvals_raw)
-            if eigvals.ndim == 2:
-                eigvals = eigvals[numpy.newaxis, :, :]
-            if eigvals.ndim != 3:
-                raise IOError("convert_bands_input: Unexpected eigenvalues shape %s." % (eigvals.shape,))
-
-            n_spin_eig, n_k_loc, n_bands = eigvals.shape
-            n_proj, n_spin_proj, n_k_proj, n_bands_proj = locproj_canonical.shape
-
-            if n_spin_eig != n_spin_blocs:
-                raise IOError("convert_bands_input: Spin mismatch between dft_input (%i) and KPOINTS_OPT eigenvalues (%i)." % (n_spin_blocs, n_spin_eig))
-            if n_spin_proj != n_spin_eig:
-                raise IOError("convert_bands_input: Spin mismatch between locproj_opt (%i) and eigenvalues (%i)." % (n_spin_proj, n_spin_eig))
-            if n_k_proj != n_k_loc:
-                raise IOError("convert_bands_input: k-point mismatch between locproj_opt (%i) and eigenvalues (%i)." % (n_k_proj, n_k_loc))
-            if n_bands_proj != n_bands:
-                raise IOError("convert_bands_input: Band mismatch between locproj_opt (%i) and eigenvalues (%i)." % (n_bands_proj, n_bands))
-            if kpoint_coords.shape[0] != n_k_loc:
-                raise IOError("convert_bands_input: kpoint_coords has %i entries but eigenvalues have %i k-points." % (kpoint_coords.shape[0], n_k_loc))
-
-            n_orbitals = numpy.full((n_k_loc, n_spin_blocs), n_bands, dtype=int)
-            hopping = numpy.zeros([n_k_loc, n_spin_blocs, n_bands, n_bands], complex)
-            for isp in range(n_spin_blocs):
-                for ik in range(n_k_loc):
-                    for ib in range(n_bands):
-                        hopping[ik, isp, ib, ib] = eigvals[isp, ik, ib] - efermi
-
-            proj_l = numpy.array([_label_to_l_m(label, ip, False)[0] for ip, label in enumerate(proj_labels)], dtype=int)
-
-            max_corr_dim = max([crsh['dim'] for crsh in self.corr_shells])
-            proj_mat = numpy.zeros([n_k_loc, n_spin_blocs, self.n_corr_shells, max_corr_dim, n_bands], complex)
-
-            for icrsh, crsh in enumerate(self.corr_shells):
-                shell_atom = int(crsh['atom'])
-                shell_l = int(crsh['l'])
-                shell_dim = int(crsh['dim'])
-
-                shell_proj_inds = [ip for ip in range(n_proj)
-                                   if int(proj_sites[ip]) == shell_atom and int(proj_l[ip]) == shell_l]
-
-                if len(shell_proj_inds) != shell_dim:
-                    raise IOError("convert_bands_input: Projector mismatch for shell %i (atom=%i, l=%i): expected dim=%i, found %i projectors in locproj_opt. Provide cfg_filename to apply TRANSFORM/NORMALIZE when needed." %
-                                  (icrsh, shell_atom, shell_l, shell_dim, len(shell_proj_inds)))
-
-                for isp in range(n_spin_blocs):
-                    for ik in range(n_k_loc):
-                        for ilm, iproj in enumerate(shell_proj_inds):
-                            proj_mat[ik, isp, icrsh, ilm, :] = locproj_canonical[iproj, isp, ik, :]
 
             return n_orbitals, proj_mat, hopping
 

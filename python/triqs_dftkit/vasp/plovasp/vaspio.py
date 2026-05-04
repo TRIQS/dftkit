@@ -45,6 +45,25 @@ from h5 import HDFArchive
 
 log = logging.getLogger('plovasp.vaspio')
 
+ORB_LABELS = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2",
+              "fy(3x2-y2)", "fxyz", "fyz2", "fz3", "fxz2", "fz(x2-y2)", "fx(x2-3y2)"]
+
+
+def label_to_l_m(label, iproj=None, nc_flag=False):
+    if isinstance(label, bytes):
+        label = label.decode('ascii')
+    label = str(label).strip()
+    if label not in ORB_LABELS:
+        raise ValueError("Unknown LOCPROJ orbital label '%s'" % label)
+    lm = ORB_LABELS.index(label)
+    l = int(np.sqrt(lm))
+    m = lm - l * l
+    if nc_flag:
+        if iproj is None:
+            raise ValueError("Projector index is required for non-collinear LOCPROJ labels")
+        m = 2 * m if (iproj % 2) == 0 else 2 * m + 1
+    return l, m
+
 
 def read_lines(filename):
     r"""
@@ -173,14 +192,6 @@ class Plocar:
         Returns projector parameters (site/orbital indices etc.) and an array
         with projectors.
         """
-        orb_labels = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2",
-                      "fy(3x2-y2)", "fxyz", "fyz2", "fz3", "fxz2", "fz(x2-y2)", "fx(x2-3y2)"]
-
-        def lm_to_l_m(lm):
-            l = int(np.sqrt(lm))
-            m = lm - l * l
-            return l, m
-
         # Read the first line of LOCPROJ to get the dimensions
         with open(locproj_filename, 'rt') as f:
             line = f.readline()
@@ -221,20 +232,13 @@ class Plocar:
                 sline = line.split(':')
                 isite = int(sline[1].split()[0])
                 label = sline[-1].strip()
-                lm = orb_labels.index(label)
-                l, m = lm_to_l_m(lm)
+                l, m = label_to_l_m(label, ip, self.nc_flag)
                 #                    ip_new = iproj_site * norb + il
                 #                    ip_prev = (iproj_site - 1) * norb + il
                 proj_params[ip]['label'] = label
                 proj_params[ip]['isite'] = isite
                 proj_params[ip]['l'] = l
-                if self.nc_flag == True:
-                    if (ip % 2) == 0:
-                        proj_params[ip]['m'] = 2 * m
-                    else:
-                        proj_params[ip]['m'] = 2 * m + 1
-                else:
-                    proj_params[ip]['m'] = m
+                proj_params[ip]['m'] = m
 
                 ip += 1
 
@@ -787,9 +791,6 @@ class h5Plocar():
 
         # self.proj_params, self.plo = self.locproj_parser(locproj_filename=vasp_dir + "LOCPROJ")
 
-        orb_labels = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2",
-                      "fy(3x2-y2)", "fxyz", "fyz2", "fz3", "fxz2", "fz(x2-y2)", "fx(x2-3y2)"]
-
         self.plo = np.zeros((self.nproj, self.nspin, nk, self.nband), dtype=complex)
 
         for proj in range(self.nproj):
@@ -800,11 +801,6 @@ class h5Plocar():
                         imag_plo = plo[proj, spin, kpt, band, 1]  # Imaginary part
                         self.plo[proj, spin, kpt, band] = complex(real_plo, imag_plo)
 
-        def lm_to_l_m(lm):
-            l = int(np.sqrt(lm))
-            m = lm - l * l
-            return l, m
-
         self.proj_params = [{} for i in range(self.nproj)]
         with HDFArchive(h5path, 'a') as archive:
             for it in range(self.nproj):
@@ -814,16 +810,9 @@ class h5Plocar():
                 self.proj_params[it]['coord'] = projectors['coordinates'][it]
 
         for it in range(self.nproj):
-            lm = orb_labels.index(self.proj_params[it]['label'].strip())
-            l, m = lm_to_l_m(lm)
+            l, m = label_to_l_m(self.proj_params[it]['label'], it, self.nc_flag)
             self.proj_params[it]['l'] = l
-            if self.nc_flag == True:
-                if (it % 2) == 0:
-                    self.proj_params[it]['m'] = 2 * m
-                else:
-                    self.proj_params[it]['m'] = 2 * m + 1
-            else:
-                self.proj_params[it]['m'] = m
+            self.proj_params[it]['m'] = m
         # assert ip == nproj, "Number of projectors in the header is wrong in LOCPROJ"
 
         print("Read parameters: LOCPROJ")
