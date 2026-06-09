@@ -83,9 +83,14 @@ try:
                                  perform_tail_fit=True,
                                  fit_min_w=10, fit_max_w=14,
                                  )
-            solver_results = solve_generic(Delta, Eimp, h_int, **solver_params)
+            # CT-SEG needs a real h_loc0: op_from_block_matrix flags coefficients complex
+            # whenever the input matrices are complex dtype (work_data.cpp extracts mu via a
+            # real_or_complex->double cast that throws on complex-flagged values). The impurity
+            # levels are Hermitian/real, so drop the ~1e-18 numerical imaginary noise here.
+            Eimp_real = [h.real.copy() for h in Eimp]
+            solver_results = solve_generic(Delta, Eimp_real, h_int, **solver_params)
 
-            Sigma_imp_dynamic, Sigma_imp_static = solver_results.Sigma_dynamic, solver_results.Sigma_Hartree
+            Sigma_imp_dynamic, Sigma_imp_static = solver_results.Sigma_dynamic, solver_results.Sigma_HartreeFock
 
             solver_results.G_iw         <<  M.symmetrize(solver_results.G_iw,          deg_blocks)
             solver_results.Sigma_iw     <<  M.symmetrize(solver_results.Sigma_iw,      deg_blocks)
@@ -109,7 +114,7 @@ try:
         # Impurity interaction energy
         Eint = 0.5 * np.real((solver_results.Sigma_iw*solver_results.G_iw).total_density())
         mpi.report(f"Eint= {Eint}")
-        Eint_m_dc = (Eint - Eimp_dc[0][0])
+        Eint_m_dc = (Eint - Eimp_dc)
         mpi.report(f"Eint-Edc= {Eint_m_dc}")
 
         mpi.report("Saving DFT + DMFT iteration...")
@@ -123,7 +128,7 @@ try:
                 ar[path]["Delta_iw"]        = Delta
                 ar[path]["Eimp"]            = Eimp
                 ar[path]["Gloc_iw"]         = Gloc
-                ar[path]["Sigma_iw_static"] = solver_results.Sigma_Hartree
+                ar[path]["Sigma_iw_static"] = solver_results.Sigma_HartreeFock
                 ar[path]["Sigma_dc"]        = Sigma_imp_dc
 
         # Update the one-body Hamiltonian with the charge density correction
