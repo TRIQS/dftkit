@@ -2,9 +2,9 @@ import numpy as np
 
 import triqs.utility.mpi as mpi
 
-from triqs.gf import BlockGf, MeshImFreq
+from triqs.gfs import BlockGf, MeshImFreq
 
-from triqs_modest.solver_interfaces.ctseg import solve as impurity_solve
+from triqs_ctseg.solve_generic import solve_generic
 
 import triqs_modest as M
 
@@ -34,7 +34,7 @@ E = M.make_embedding(obe.C_space); mpi.report(E.description(True))
 
 h_int = M.make_kanamori(E.sigma_names, E.imp_decomposition(0), U, Up, J, False, False)
 
-DcTerm = M.DcSolver(2, "cHeld", U, J)
+DcTerm = M.DcSolver("NonPolarized", "cHeld", U, J)
 
 mesh = MeshImFreq(beta=beta, S = "Fermion", n_iw=n_iw)
 
@@ -54,7 +54,7 @@ for i in range(len(Sigma_imp_static)): Sigma_imp_static[i] += Sigma_imp_dc[i]
 try:
     for n_iter in range(n_total_loops):
 
-        Hloc0 = E.extract(M.impurity_levels(obe))[0]
+        Hloc0 = E.extract(M.atomic_levels_and_delta.impurity_levels(obe))[0]
         mpi.report(f"Hloc0= {[h[0,0].real for h in Hloc0]}")
 
         # for first iteration converge Sigma imp first
@@ -75,7 +75,7 @@ try:
 
             Eimp = [h-mu*np.eye(h.shape[0])-dc for (h,dc) in zip(Hloc0, Sigma_imp_dc)]
 
-            Delta = M.symmetrize_gf(M.hybridization(Eimp, Gloc, Sigma_imp_dynamic, Sigma_imp_static), deg_blocks)
+            Delta = M.symmetrize(M.hybridization(Eimp, Gloc, Sigma_imp_dynamic, Sigma_imp_static), deg_blocks)
 
             solver_params = dict(n_iw=n_iw, n_tau=10*n_iw, length_cycle=50,
                                  n_cycles = int(1e+6/mpi.size),
@@ -83,13 +83,13 @@ try:
                                  perform_tail_fit=True,
                                  fit_min_w=10, fit_max_w=14,
                                  )
-            solver_results = impurity_solve(Delta, Eimp, h_int, **solver_params)
+            solver_results = solve_generic(Delta, Eimp, h_int, **solver_params)
 
             Sigma_imp_dynamic, Sigma_imp_static = solver_results.Sigma_dynamic, solver_results.Sigma_Hartree
 
-            solver_results.G_iw         <<  M.symmetrize_gf(solver_results.G_iw,          deg_blocks)
-            solver_results.Sigma_iw     <<  M.symmetrize_gf(solver_results.Sigma_iw,      deg_blocks)
-            solver_results.Sigma_dynamic << M.symmetrize_gf(solver_results.Sigma_dynamic, deg_blocks)
+            solver_results.G_iw         <<  M.symmetrize(solver_results.G_iw,          deg_blocks)
+            solver_results.Sigma_iw     <<  M.symmetrize(solver_results.Sigma_iw,      deg_blocks)
+            solver_results.Sigma_dynamic << M.symmetrize(solver_results.Sigma_dynamic, deg_blocks)
         # End of DMFT loop
         # Update Double-counting Term
         Sigma_imp_dc = DcTerm.dc_self_energy(solver_results.G_iw)
