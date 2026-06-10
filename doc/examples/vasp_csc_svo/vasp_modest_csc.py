@@ -53,6 +53,7 @@ for i in range(len(Sigma_imp_static)): Sigma_imp_static[i] += Sigma_imp_dc[i]
 # DFT + DMFT loop
 try:
     for n_iter in range(n_total_loops):
+        mpi.report(f"\n{'='*60}\n=== Global DFT+DMFT iteration {n_iter+1}/{n_total_loops} ===\n{'='*60}")
 
         Hloc0 = E.extract(M.atomic_levels_and_delta.impurity_levels(obe))[0]
         mpi.report(f"Hloc0= {[h[0,0].real for h in Hloc0]}")
@@ -64,6 +65,8 @@ try:
             n_dmft_loops_loc = n_dmft_loops
         # Begin DMFT loop
         for n_dmft_iter in range(n_dmft_loops_loc):
+            mpi.report(f"\n--- DMFT iteration {n_dmft_iter+1}/{n_dmft_loops_loc} "
+                       f"(global iter {n_iter+1}/{n_total_loops}) ---")
 
             Sigma_imp_static_minus_dc = [block-dc for (block, dc) in zip(Sigma_imp_static, Sigma_imp_dc)]
 
@@ -132,6 +135,8 @@ try:
                 ar[path]["Sigma_dc"]        = Sigma_imp_dc
 
         # Update the one-body Hamiltonian with the charge density correction
+        mpi.report(f"Calling VASP charge update / DFT driver "
+                   f"(global iter {n_iter+1}/{n_total_loops})...")
         obe = driver.update_one_body_elements_with_charge_correction(N_k, Eint_m_dc)[1]
 
 finally:
