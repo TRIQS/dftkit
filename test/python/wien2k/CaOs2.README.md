@@ -79,3 +79,17 @@ for conversion of the same fixture bytes. It does not use
 `triqs.utility.h5diff`, which compares arrays at `1e-6` regardless of its
 `precision` argument. The physical overlap check uses `1e-6` because the
 retained Wien2k inputs and native text output have finite precision.
+
+The Python `symqmc` generator is checked separately against the shipped
+`CaOs2.symqmc`, with exact header comparison and `atol=1e-7, rtol=0` for
+complex matrix entries. The maximum complex residual is about `8.6e-8`
+(`6.9e-8` for individual real or imaginary components). In
+`set_ang_trans.f`, the cubic reader converts the template's `0.70710678`
+through `CMPLX` without `KIND=8`, rounding it to `0.7071067690849304`.
+This gives an identity-operation diagonal of `0.9999999657714582`;
+the magnetic operations apply the rounded basis twice. The spin phases in
+`outputqmc.f` are also evaluated through single-precision `CMPLX` and `EXP`.
+The Python generator uses exact cubic d coefficients and double-precision
+phases; its generated matrices are checked for unitarity at `1e-12`.
+It writes only into a temporary directory, so the converter tests always
+read the original native fixture.
