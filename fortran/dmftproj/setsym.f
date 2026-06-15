@@ -826,7 +826,7 @@ C Up/dn block :
 C We remind that the field phase is (g-a) in this case.
 C as a result, ephase = exp(+i(g-a)/2) = -exp(+i(alpha-gamma)/2)
 C in good agreement with Wien conventions for the definition of this phase factor.
-         ephase=EXP(CMPLX(0.d0,factor))
+         ephase=EXP(CMPLX(0.d0,factor,KIND=8))
          spinrot(1:2*l+1,2*l+2:2*(2*l+1))=
      =     ephase*srot(isym)%rotl(-l:l,-l:l,l)
 C Dn/up block :
@@ -842,7 +842,7 @@ C Up/up block :
 C We remind that the field phase is (a+g) in this case.
 C as a result, ephase = exp(+i(a+g)/2)=-exp(-i(alpha+gamma)/2)
 C in good agreement with Wien conventions for the definition of this phase factor.
-         ephase=EXP(CMPLX(0.d0,factor))
+         ephase=EXP(CMPLX(0.d0,factor,KIND=8))
          spinrot(1:2*l+1,1:2*l+1)=
      =     ephase*srot(isym)%rotl(-l:l,-l:l,l)
 C Dn/dn block :
