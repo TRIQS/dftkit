@@ -65,6 +65,12 @@ add_test(NAME Py_wien2k_sympar_python
 set_property(TEST Py_wien2k_sympar_python APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
+add_test(NAME Py_wien2k_parproj_python
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_parproj_python.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_parproj_python APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
 add_test(NAME Py_wien2k_kpath_labels
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_kpath_labels.py
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
