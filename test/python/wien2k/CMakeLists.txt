@@ -46,11 +46,20 @@ set_property(TEST Py_wien2k_symqmc_mixing APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
 # Pure-Python case.oubwin band-window generator vs the dmftproj Fortran output.
-# Reuses the committed CaOs2.oubwin{up,dn} references; adds the truncated almblm
-# inputs (header + first-sort band block, ~5 kB each) the selection reads.
-file(COPY CaOs2.almblmup CaOs2.almblmdn DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+# Reuses the committed CaOs2.oubwin{up,dn} references and the gzipped CaOs2
+# almblm inputs (shared with the ctqmcout test).
+file(COPY CaOs2.almblmup.gz CaOs2.almblmdn.gz DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME Py_wien2k_oubwin_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_oubwin_python.py
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_oubwin_python APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+# Pure-Python case.ctqmcout correlated-shell projector generator vs the dmftproj
+# Fortran output. Reuses CaOs2.ctqmcout / indmftpr / struct / dmftsym and the
+# gzipped almblm; floats compared at 1e-6 (dmftproj single-precision floor).
+add_test(NAME Py_wien2k_ctqmcout_python
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_ctqmcout_python.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_ctqmcout_python APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
