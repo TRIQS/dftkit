@@ -63,3 +63,14 @@ add_test(NAME Py_wien2k_ctqmcout_python
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_ctqmcout_python APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+# Pure-Python case.sympar partial-shell symmetry generator vs the dmftproj
+# Fortran output. The CaOs2_partial fixture adds an uncorrelated Ca d-shell to
+# the correlated Os d-shells; inputs reuse the CaOs2 struct/dmftsym/almblm.
+file(COPY CaOs2_partial.indmftpr CaOs2_partial.sympar.gz
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME Py_wien2k_sympar_python
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_sympar_python.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_sympar_python APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
