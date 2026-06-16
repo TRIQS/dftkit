@@ -68,7 +68,7 @@ def _check(indmftpr, ref_npy, extra=(), unit_tol=1e-7):
     assert np.max(np.abs(data - ref)) < 1e-11, np.max(np.abs(data - ref))
     for op in ops:
         for sh in shells:
-            mat = symqmc._shell_matrix(op, sh, _timeinv(op, so))
+            mat = symqmc._shell_matrix(op, sh, _timeinv(op, so), bool(so))
             dev = np.max(np.abs(mat @ np.conj(mat.T) - np.eye(mat.shape[0])))
             assert dev < unit_tol, ('not unitary', dev)
 
