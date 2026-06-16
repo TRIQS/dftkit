@@ -106,3 +106,18 @@ add_test(NAME Py_wien2k_dmftproj_common
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_dmftproj_common APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+# Pure-Python case.outband band-structure projector generator (the -band path
+# that feeds convert_bands_input) vs the precision-fixed dmftproj -band output.
+# The CaOs2_band fixture is the spin-mixing fromfile (|j, m_j>) Os d shell on a
+# 4-point k-path; the band almblm carries a single representative k-point and the
+# Fermi energy comes from the last line of the band indmftpr. Reuses
+# CaOs2.struct/dmftsym and jbasis_d.dat; floats compared at 1e-11 (full-rank
+# wide window).
+file(COPY CaOs2_band.indmftpr CaOs2_band.klist_band
+          CaOs2_band.almblmup.gz CaOs2_band.almblmdn.gz CaOs2_band.outband.gz
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME Py_wien2k_outband_python
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_outband_python.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_outband_python APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
