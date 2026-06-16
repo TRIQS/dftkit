@@ -173,6 +173,10 @@ def small_d(l, m, n, b):
 
 
 def dmat(l, a, b, c, det):
+    # det is the improper-rotation parity: pass op['iprop'] (+-1), not
+    # np.linalg.det(krotm). krotm in case.dmftsym is the proper part and its
+    # determinant is +1 even for improper ops, so it drops the (-1)^l parity
+    # factor. Harmless for even l, wrong sign for odd l (p, f).
     D = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
     for m in range(-l, l + 1):
         for n in range(-l, l + 1):
@@ -252,7 +256,7 @@ def mixing_rotrep(op, l, P, ti):
     time-reversal operator applied for the magnetic (timeinv) operations
     (setsym.f spinrotmat + timeinv_op). This is srot%rotrep(l,isrt)%mat, shared
     by the symqmc and sympar shell matrices."""
-    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    rotl = dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
     phase = (op['c'] - op['a']) if ti else (op['a'] + op['c'])
     e = np.exp(1j * phase / 2)
     d = 2 * l + 1

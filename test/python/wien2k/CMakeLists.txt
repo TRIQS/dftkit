@@ -134,3 +134,18 @@ add_test(NAME Py_wien2k_noso_python
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_noso_python APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+# Odd-l shells (p l=1, f l=3): the improper-rotation parity (-1)^l is invisible
+# for the even-l (d) fixtures, so these pin dmat's use of iprop. p uses the
+# standard almblm (wide window, full rank); f uses a high-band-cutoff almblm so
+# the high-energy window carries real l=3 character and the Loewdin overlap is
+# full rank. Both reproduce the precision-fixed dmftproj to machine precision.
+file(COPY CaOs2_pshell.indmftpr CaOs2_pshell.ctqmcout.gz CaOs2_pshell.symqmc.gz
+          CaOs2_fshell.indmftpr CaOs2_fshell.almblmup.gz CaOs2_fshell.almblmdn.gz
+          CaOs2_fshell.ctqmcout.gz CaOs2_fshell.symqmc.gz
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME Py_wien2k_oddl_python
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_oddl_python.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_oddl_python APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})

@@ -162,7 +162,7 @@ def _nonmixing_matrix(op, shell, ti):
     """Spin-diagonal basis: the up/up block scaled by +-(a+g)/2, with the
     orbital time-reversal operator on the magnetic operations."""
     l, P = shell['l'], shell['P']
-    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    rotl = dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
     if ti:
         rotl = timeinv_orbital(l, rotl)
     rotrep = P @ rotl @ np.conj(P.T)
@@ -179,7 +179,7 @@ def _nonmixing_orbital(op, shell):
     P D(R)_{lm} P^H (setsym.f non-SO branch). Under non-SO srot%timeinv is
     always false, so no orbital time-reversal or spin phase enters."""
     l, P = shell['l'], shell['P']
-    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    rotl = dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
     return P @ rotl @ np.conj(P.T)
 
 
