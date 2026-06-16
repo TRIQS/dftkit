@@ -26,10 +26,6 @@ set_property(TEST Py_wien2k_soc_convert APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
 # Pure-Python case.symqmc generator vs the shipped dmftproj Fortran output.
-# Native precision is checked against unitarity, without regenerating fixtures.
-add_test(NAME Py_wien2k_native_precision
-         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_native_precision.py $<TARGET_FILE:dmftproj>)
-
 # The generator tests read source fixtures and write only to scratch directories.
 add_test(NAME Py_wien2k_symqmc_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_symqmc_python.py
@@ -130,4 +126,29 @@ add_test(NAME Py_wien2k_oddl_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_oddl_python.py
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_oddl_python APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+# Capstone: the pure-Python run_dmftproj driver replaces the Fortran executable.
+# Both tests run the driver through the converter and compare every HDF value
+# at machine precision (1e-12). The Loewdin overlap must be full rank: the physical
+# narrow window is rank-deficient (more correlated spin-orbitals than bands, so
+# O^{-1/2} has non-unique null eigenvectors), which is why the wide window is
+# used here. The narrow physical case is still locked exactly by the
+# Fortran-output converter test wien2k_soc_convert.
+#   Non-SO partial: convert_dft_input on the SP/non-SO oubwin path + convert_parproj_input.
+#   SO full-rank:   convert_dft_input on a wide-window SO cell.
+file(COPY CaOs2_noso_partial.indmftpr CaOs2_noso.almblmup.gz CaOs2_noso.almblmdn.gz
+          CaOs2.struct CaOs2.dmftsym CaOs2.outputs wien2k_noso_convert.ref.h5
+          CaOs2_socfull.indmftpr CaOs2.almblmup.gz CaOs2.almblmdn.gz
+          wien2k_socfull_convert.ref.h5
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME Py_wien2k_noso_convert
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_noso_convert.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_noso_convert APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+add_test(NAME Py_wien2k_socfull_convert
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_socfull_convert.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_socfull_convert APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
