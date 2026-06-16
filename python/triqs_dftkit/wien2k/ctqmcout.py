@@ -112,18 +112,23 @@ def _build_orbs(info):
 
 # --- Rloc spinor representation (set_rotloc.f / setsym.f) ---------------------
 
-def _rloc_rotrep(op, l, transmat):
-    """rotloc%rotrep(l)%mat, the 2(2l+1) spinor rotation in the new basis for a
-    non-mixing SO shell, with identity struct local rotation (rotloc_ref
-    Euler = 0). rotloc%rotl = blkdiag(ephase*D, conj(ephase)*D) with
-    D = D(R[isym])_{lm}, ephase = exp(i*phase/2); rotrep = S rotl S^H,
-    S = blkdiag(transmat, transmat). Returns (rotrep, timeinv)."""
+def _rloc_rotrep(op, l, transmat, ifSO):
+    """rotloc%rotrep(l)%mat, the Rloc rotation in the new basis for a non-mixing
+    shell, with identity struct local rotation (rotloc_ref Euler = 0).
+
+    Under SO it is the 2(2l+1) spinor rotation: rotloc%rotl =
+    blkdiag(ephase*D, conj(ephase)*D), rotrep = S rotl S^H, S =
+    blkdiag(transmat, transmat). Without SO srot%timeinv is always false, there
+    is no spin phase, and it reduces to the bare (2l+1) transmat D transmat^H
+    (set_rotloc.f non-SO branch). Returns (rotrep, timeinv)."""
     a, b, g, iprop = op['a'], op['b'], op['g'], op['iprop']
+    D = dmat(l, a, b, g, float(iprop))
+    if not ifSO:
+        return transmat @ D @ np.conj(transmat.T), False
     krotm = op['krotm']
     det2 = krotm[0, 0] * krotm[1, 1] - krotm[0, 1] * krotm[1, 0]
     timeinv = det2 < 0.0
     phase = (g - a) if timeinv else (a + g)
-    D = dmat(l, a, b, g, float(iprop))
     if timeinv:
         D = tmat(l) @ np.conj(D)       # setsym.f:320-326 orbital time reversal
     ephase = np.exp(1j * phase / 2)
@@ -276,10 +281,17 @@ def write_ctqmcout(case):
                 for ispin in range(ns):
                     mat_rep[(icr, ik, ispin)] = transmat @ spin_blocks[ispin]
 
-    # Loewdin: per k stack all crorb rows. A mixing crorb contributes its full
-    # 2(2l+1) block once (is=1 only); a non-mixing one the two (2l+1) spin
-    # blocks (orthogonal_wannier_SO ndim layout).
-    for ik in range(nk):
+    # Loewdin orthonormalization. Under SO (orthogonal_wannier_SO) the up+dn
+    # blocks of each crorb are stacked together and a single overlap is
+    # orthonormalized per k. Without SO (orthogonal_wannier) spin is a good
+    # quantum number, so each spin is orthonormalized independently over the
+    # stack of (2l+1)-wide crorb blocks of that spin.
+    if ifSO:
+        ortho_groups = [[(ik, None)] for ik in range(nk)]
+    else:
+        ortho_groups = [[(ik, ispin)] for ik in range(nk) for ispin in range(ns)]
+    for group in ortho_groups:
+        (ik, gspin) = group[0]
         incl, nb_bot, nb_top = windows[ik]
         if not incl:
             continue
@@ -287,15 +299,18 @@ def write_ctqmcout(case):
         layout = []  # (key, nrows)
         for icr, cr in enumerate(crorbs):
             l = cr['l']
-            if mixing[(l, cr['sort'])]:
+            if ifSO and mixing[(l, cr['sort'])]:
                 blocks.append(mat_rep[(icr, ik)])
                 layout.append(((icr, ik), 2 * (2 * l + 1)))
-            else:
+            elif ifSO:
                 for ispin in range(ns):
                     blocks.append(mat_rep[(icr, ik, ispin)])
                     layout.append(((icr, ik, ispin), 2 * l + 1))
+            else:
+                blocks.append(mat_rep[(icr, ik, gspin)])
+                layout.append(((icr, ik, gspin), 2 * l + 1))
         D = np.vstack(blocks)                 # ndim x nbnd
-        # match the Fortran's exact BLAS calls (orthogonal_wannier_SO): the
+        # match the Fortran's exact BLAS calls (orthogonal_wannier[_SO]): the
         # near-singular O^{-1/2} amplifies any last-bit difference, so use the
         # identical ZGEMM trans flags rather than numpy's conj-transpose copies.
         O = zgemm(1.0, D, D, trans_b=2)        # ZGEMM('N','C'): D @ D^H
@@ -317,7 +332,7 @@ def write_ctqmcout(case):
                 l, rotloc_ref[cr['sort'] - 1], ops, cr['atom'], iref, transmat))
         else:
             op = next(o for o in ops if o['perm'][iref - 1] == cr['atom'])
-            rloc_blocks.append(_rloc_rotrep(op, l, transmat))
+            rloc_blocks.append(_rloc_rotrep(op, l, transmat, ifSO))
 
     # ---- write ----
     with open(case + '.ctqmcout', 'w') as f:
@@ -338,15 +353,18 @@ def write_ctqmcout(case):
             l = cr['l']
             size = 2 * (2 * l + 1) if ifSO else 2 * l + 1
             f.write('%6d %6d %6d %6d %6d %6d \n' %
-                    (cr['atom'], cr['sort'], l, size, 1, 1))
+                    (cr['atom'], cr['sort'], l, size, 1 if ifSO else 0, 1))
 
-        # Rloc block per crorb (non-mixing SP+SO whole shell)
+        # Rloc block per crorb. SO writes the 2*(2l+1) spinor whole shell;
+        # non-SO the bare (2l+1) shell. The time-reversal flag follows under
+        # SO always, under non-SO only when ifSP (outputqmc.f:347-351).
         for rotrep, timeinv in rloc_blocks:
             for m in range(rotrep.shape[0]):
                 write_row(f, rotrep[m, :].real)
             for m in range(rotrep.shape[0]):
                 write_row(f, rotrep[m, :].imag)
-            f.write('%6d\n' % (1 if timeinv else 0))
+            if ifSO or ifSP:
+                f.write('%6d\n' % (1 if timeinv else 0))
 
         # complex-harmonics -> basis transform block (crorb%first only). Mixing
         # writes the full 2(2l+1) transmat; non-mixing the spin block-diagonal.
@@ -358,14 +376,17 @@ def write_ctqmcout(case):
             d = 2 * l + 1
             if mixing[(l, cr['sort'])]:
                 spinrot = transmat
-            else:
+            elif ifSO:
                 spinrot = np.zeros((2 * d, 2 * d), dtype=complex)
                 spinrot[:d, :d] = transmat
                 spinrot[d:, d:] = transmat
-            f.write('%6d %6d \n' % (1, 2 * d))
-            for m in range(2 * d):
+            else:
+                spinrot = transmat       # bare (2l+1) transform, non-SO
+            dim = spinrot.shape[0]
+            f.write('%6d %6d \n' % (1, dim))
+            for m in range(dim):
                 write_row(f, spinrot[m, :].real)
-            for m in range(2 * d):
+            for m in range(dim):
                 write_row(f, spinrot[m, :].imag)
 
         # number of bands per k (skip is=2 under SO)

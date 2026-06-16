@@ -106,12 +106,23 @@ def _nonmixing_matrix(op, shell, ti):
     return mat
 
 
-def _shell_matrix(op, shell, ti):
+def _nonmixing_orbital(op, shell):
+    """Non-SO spin-diagonal basis: the bare (2l+1) representation
+    P D(R)_{lm} P^H (setsym.f non-SO branch, outputqmc.f:1342-1349). Under
+    non-SO srot%timeinv is always false, so no time-reversal or phase."""
+    l, P = shell['l'], shell['P']
+    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    return P @ rotl @ np.conj(P.T)
+
+
+def _shell_matrix(op, shell, ti, ifSO):
     l = shell['l']
     if l == 0:
         return _l0_matrix(op, ti)
     if shell['mixing']:
         return mixing_rotrep(op, l, shell['P'], bool(ti))
+    if not ifSO:
+        return _nonmixing_orbital(op, shell)
     return _nonmixing_matrix(op, shell, ti)
 
 
@@ -161,7 +172,7 @@ def write_sympar(case):
                     f.write(fmt(1.0) + '\n')
                     f.write(fmt(0.0) + '\n')
                     continue
-                _write_matrix(f, _shell_matrix(op, sh, ti))
+                _write_matrix(f, _shell_matrix(op, sh, ti, ifSO))
 
         if not ifSP:
             for sh in shells:

@@ -47,10 +47,12 @@ set_ang_trans.f), so its case.symqmc carries a ~1e-7 error there; this generator
 is full double precision.
 """
 
+import os
+
 import numpy as np
 
 from ._dmftproj import (dmat, mixing_rotrep, read_dmftsym, read_fromfile,
-                        read_indmftpr, reptrans, timeinv_orbital)
+                        read_indmftpr, reptrans, timeinv_orbital, tmat)
 
 
 # --- correlated shells -------------------------------------------------------
@@ -85,35 +87,63 @@ def _read_correlated_shells(indmftpr, struct):
 
 
 def write_symqmc(case):
-    """Write <case>.symqmc from <case>.dmftsym, <case>.indmftpr, <case>.struct."""
+    """Write <case>.symqmc from <case>.dmftsym, <case>.indmftpr, <case>.struct.
+
+    ifSO comes from the indmftpr SO flag; ifSP from the presence of
+    <case>.almblm{up,dn} (ifSO => ifSP). With SO the matrices are the 2*(2l+1)
+    block-diag spinor representation and a timeflag line is written; without SO
+    they are the bare (2l+1) representation, with a timeflag line (all zero)
+    only when ifSP. The paramagnetic time-reversal tail follows when .not.ifSP."""
     nsym, ops = read_dmftsym(case + '.dmftsym')
     info = read_indmftpr(case + '.indmftpr')
     shells, so = _correlated_shells(info), info['so']
     natom = len(ops[0]['perm'])
 
+    ifSO = bool(so)
+    ifSP = (os.path.exists(case + '.almblmup')
+            and os.path.exists(case + '.almblmdn')) or ifSO
+
     timeinv = []
     for op in ops:
         det2 = op['krotm'][0, 0] * op['krotm'][1, 1] - op['krotm'][0, 1] * op['krotm'][1, 0]
-        timeinv.append(1 if (so and det2 < 0.0) else 0)
+        timeinv.append(1 if (ifSO and det2 < 0.0) else 0)
 
     with open(case + '.symqmc', 'w') as f:
         f.write('%6d %6d\n' % (nsym, natom))
         for op in ops:
             f.write(''.join('%6d ' % p for p in op['perm']) + '\n')
-        if so:
+        if ifSP:
             f.write(''.join('%6d ' % t for t in timeinv) + '\n')
         for isym, op in enumerate(ops):
             for sh in shells:
-                f.write(_format_matrix(_shell_matrix(op, sh, timeinv[isym])))
+                f.write(_format_matrix(_shell_matrix(op, sh, timeinv[isym], ifSO)))
+        if not ifSP:
+            for sh in shells:
+                f.write(_format_matrix(_time_op_matrix(sh)))
 
 
-def _shell_matrix(op, shell, ti):
-    """Spinor symmetry matrix for one correlated shell under one operation."""
+def _time_op_matrix(shell):
+    """Paramagnetic time-reversal operator for one correlated shell (.not.ifSP,
+    outputqmc.f:835-887): the (2l+1) operator P T P^T in the new basis; the s
+    shell reduces to the 1x1 identity."""
     l = shell['l']
     if l == 0:
-        return _l0_matrix(op, ti)
+        return np.array([[1.0 + 0j]], dtype=complex)
+    P = shell['P']
+    return (P @ tmat(l) @ P.T) @ np.eye(2 * l + 1, dtype=complex)
+
+
+def _shell_matrix(op, shell, ti, ifSO):
+    """Symmetry matrix for one correlated shell under one operation: the
+    2*(2l+1) block-diag spinor representation under SO, the bare (2l+1)
+    representation otherwise."""
+    l = shell['l']
+    if l == 0:
+        return _l0_matrix(op, ti) if ifSO else np.array([[1.0 + 0j]], dtype=complex)
     if shell['mixing']:
         return _mixing_matrix(op, shell, ti)
+    if not ifSO:
+        return _nonmixing_orbital(op, shell)
     return _nonmixing_matrix(op, shell, ti)
 
 
@@ -142,6 +172,15 @@ def _nonmixing_matrix(op, shell, ti):
     mat[:d, :d] = e * rotrep
     mat[d:, d:] = np.conj(e) * rotrep
     return mat
+
+
+def _nonmixing_orbital(op, shell):
+    """Non-SO spin-diagonal basis: the bare (2l+1) representation
+    P D(R)_{lm} P^H (setsym.f non-SO branch). Under non-SO srot%timeinv is
+    always false, so no orbital time-reversal or spin phase enters."""
+    l, P = shell['l'], shell['P']
+    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    return P @ rotl @ np.conj(P.T)
 
 
 def _mixing_matrix(op, shell, ti):

@@ -138,6 +138,18 @@ def _srot_rotrep_nonmixing(op, l, transmat, ifSP, ifSO):
 
 # --- rotloc rotrep (set_rotloc.f) under SP+SO, non-mixing --------------------
 
+def _rotloc_rotrep_nonso(orb, ops, info, transmat):
+    """rotloc(iatom)%rotrep(l)%mat without SO: the bare (2l+1) Rloc rotation in
+    the new basis, transmat D(Rloc)_{lm} transmat^H with D(Rloc) the symmetry op
+    mapping the sort representative onto this atom (set_rotloc.f non-SO branch).
+    srot%timeinv is always false under non-SO, so timeinv=False."""
+    l = orb['l']
+    iref = sum(info['mult'][:orb['sort'] - 1]) + 1
+    op = next(o for o in ops if o['perm'][iref - 1] == orb['atom'])
+    D = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+    return transmat @ D @ np.conj(transmat.T), False
+
+
 def _rotloc_rotrep_so(orb, ops, info, ref, transmat, mixing):
     """rotloc(iatom)%rotrep(l)%mat, the full 2*(2l+1) Rloc spinor rotation in
     the new basis under SP+SO (set_rotloc.f), plus timeinv flag.
@@ -368,6 +380,44 @@ def _symmetrize_densmat(orbs, info, ops, nsym, srot_rotreps, dens_raw, ns,
     return out
 
 
+def _symmetrize_densmat_nonso(orbs, info, ops, nsym, srot_rotreps, dens_raw):
+    """symmetrize_mat for the non-SO non-mixing path (symmetrize_mat.f:196-262,
+    nsp=2). Only the two diagonal blocks (up/up, dn/dn) exist; srot%timeinv is
+    always false so the ephase phase factors are 1. Each block is summed over
+    symmetry ops as rotrep block rotrep^H, equivalent atoms scattering via the
+    permutation, divided by nsym. Returns per-atom [up/up, dn/dn]."""
+    out = {}
+    isort_groups = {}
+    for o in orbs:
+        isort_groups.setdefault(o['sort'], []).append(o)
+    for isrt, group in isort_groups.items():
+        l = group[0]['l']
+        d = 2 * l + 1
+        mult = len(group)
+        sym = [[np.zeros((d, d), dtype=complex) for _ in range(2)]
+               for _ in range(mult)]
+        for imult in range(mult):
+            iatom = group[imult]['atom']
+            for isym in range(nsym):
+                op = ops[isym]
+                rotrep, _, _ = srot_rotreps[(isrt, isym)]
+                jorb = op['perm'][iatom - 1] - iatom + imult
+                for iss in range(2):
+                    blk = dens_raw[iatom][iss]
+                    sym[jorb][iss] += rotrep @ (blk @ np.conj(rotrep.T))
+        for imult in range(mult):
+            iatom = group[imult]['atom']
+            out[iatom] = [sym[imult][k] / nsym for k in range(2)]
+    return out
+
+
+def _rotdens_densmat_nonso(blocks, rotrep_loc):
+    """rotdens_mat for the non-SO non-mixing path (rot_dens.f:197-228, nsp=2):
+    each (2l+1) spin block is rotated as conj(Rloc^T) D Rloc with the bare
+    (2l+1) rotloc rotrep (timeinv always false). Returns [up/up, dn/dn]."""
+    return [np.conj(rotrep_loc.T) @ (blk @ rotrep_loc) for blk in blocks]
+
+
 def _rotdens_densmat(orb, blocks, rotrep_loc, timeinv):
     """rotdens_mat for non-mixing SP+SO (rot_dens.f:151-193): assemble the four
     blocks into a 2*(2l+1) matrix, apply inverse(Rloc) D Rloc, return it as the
@@ -473,12 +523,17 @@ def write_parproj(case):
     rotloc_rotrep = {}
     for o in orbs:
         transmat = transmats[(o['l'], o['sort'])]
-        ref = rotloc_ref[o['sort'] - 1]
-        rotloc_rotrep[o['atom']] = _rotloc_rotrep_so(
-            o, ops, info, ref, transmat, mixing[(o['l'], o['sort'])])
+        if not ifSO:
+            rotloc_rotrep[o['atom']] = _rotloc_rotrep_nonso(o, ops, info, transmat)
+        else:
+            ref = rotloc_ref[o['sort'] - 1]
+            rotloc_rotrep[o['atom']] = _rotloc_rotrep_so(
+                o, ops, info, ref, transmat, mixing[(o['l'], o['sort'])])
 
     # ---- density matrices: raw -> symmetrize -> rotdens ----
-    # Non-mixing sorts use the 4-block path; mixing sorts the single-block path.
+    # Non-mixing sorts use the block path; mixing sorts the single-block path.
+    # Under SO each non-mixing density is the 2*(2l+1) 4-block matrix; without
+    # SO it is two independent (2l+1) spin blocks (density.f nsp=2 path).
     nonmix_orbs = [o for o in orbs if not mixing[(o['l'], o['sort'])]]
     densprint = {}
 
@@ -495,12 +550,20 @@ def write_parproj(case):
         dens_raw = {o['atom']: _orbital_densmat_blocks(
             o, info, spins, ns, below_windows, matn_reps_full)
             for o in nonmix_orbs}
-        dens_sym = _symmetrize_densmat(nonmix_orbs, info, ops, nsym,
-                                       srot_rotreps, dens_raw, ns, ifSP, ifSO)
-        for o in nonmix_orbs:
-            rotrep_loc, timeinv = rotloc_rotrep[o['atom']]
-            densprint[o['atom']] = _rotdens_densmat(
-                o, dens_sym[o['atom']], rotrep_loc, timeinv)
+        if ifSO:
+            dens_sym = _symmetrize_densmat(nonmix_orbs, info, ops, nsym,
+                                           srot_rotreps, dens_raw, ns, ifSP, ifSO)
+            for o in nonmix_orbs:
+                rotrep_loc, timeinv = rotloc_rotrep[o['atom']]
+                densprint[o['atom']] = _rotdens_densmat(
+                    o, dens_sym[o['atom']], rotrep_loc, timeinv)
+        else:
+            dens_sym = _symmetrize_densmat_nonso(nonmix_orbs, info, ops, nsym,
+                                                 srot_rotreps, dens_raw)
+            for o in nonmix_orbs:
+                rotrep_loc, _ = rotloc_rotrep[o['atom']]
+                densprint[o['atom']] = _rotdens_densmat_nonso(
+                    dens_sym[o['atom']], rotrep_loc)
 
     for o in orbs:
         l, sort = o['l'], o['sort']
@@ -550,18 +613,29 @@ def write_parproj(case):
                         for mi in range(2 * l + 1):
                             write_row(f, P[mi, :].imag)
 
-            # (B) density matrix, SP+SO 2*(2l+1) (outputqmc.f:1012-1066).
+            # (B) density matrix (outputqmc.f:1012-1066). SO writes the single
+            # 2*(2l+1) block; mixing too; non-SO the two (2l+1) spin blocks
+            # (each real then imag, per spin, outputqmc.f:1052-1064).
             dp = densprint[atom]
-            for m in range(2 * (2 * l + 1)):
-                write_row(f, dp[m, :].real)
-            for m in range(2 * (2 * l + 1)):
-                write_row(f, dp[m, :].imag)
+            if ifSO or ismix:
+                for m in range(2 * (2 * l + 1)):
+                    write_row(f, dp[m, :].real)
+                for m in range(2 * (2 * l + 1)):
+                    write_row(f, dp[m, :].imag)
+            else:
+                for ispin in range(ns):
+                    for m in range(2 * l + 1):
+                        write_row(f, dp[ispin][m, :].real)
+                for ispin in range(ns):
+                    for m in range(2 * l + 1):
+                        write_row(f, dp[ispin][m, :].imag)
 
-            # (C) Rloc rotrep, SP+SO 2*(2l+1) (outputqmc.f:1130-1177).
+            # (C) Rloc rotrep (outputqmc.f:1130-1177). SO/mixing 2*(2l+1);
+            # non-SO bare (2l+1). The time-reversal flag follows under ifSP.
             rotrep_loc, timeinv = rotloc_rotrep[atom]
-            for m in range(2 * (2 * l + 1)):
+            for m in range(rotrep_loc.shape[0]):
                 write_row(f, rotrep_loc[m, :].real)
-            for m in range(2 * (2 * l + 1)):
+            for m in range(rotrep_loc.shape[0]):
                 write_row(f, rotrep_loc[m, :].imag)
             if ifSP:
                 f.write('%6d\n' % (1 if timeinv else 0))
