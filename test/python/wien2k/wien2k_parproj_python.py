@@ -37,7 +37,7 @@ def _compare(got_path, ref_lines):
         else:
             max_float = max(max_float, abs(float(a) - float(b)))
     assert max_int == 0, f'integer field differs (max {max_int})'
-    assert max_float < 1e-6, f'float field differs (max {max_float:.2e})'
+    assert max_float < 1e-11, f'float field differs (max {max_float:.2e})'
 
 
 def _check(case):

@@ -57,20 +57,28 @@ to match the committed file the transmat is cast to complex64 before use
 
 import os
 import numpy as np
+from scipy.linalg.lapack import zheev
+from scipy.linalg.blas import zgemm
 
 from ._dmftproj import (dmat, fmt_scalar, read_almblm, read_dmftsym,
                         read_indmftpr, reptrans, select_window, tmat, write_row)
 
 
 def _sqrt_inv(O):
-    """O^{-1/2} of a Hermitian matrix (orthogonal.f sqrtm with inv=.TRUE.:
-    Z diag(w^{-1/2}) Z^H). dmftproj evaluates 1/sqrt of the eigenvalue as a
-    *complex* sqrt (W_comp = CMPLX(W,0)), so a (numerically) negative
-    eigenvalue contributes i/sqrt(|w|) rather than NaN; reproduce that with a
-    complex power. The final result D1 @ conj(Z).T matches sqrtm exactly."""
-    w, Z = np.linalg.eigh(O)
-    D1 = Z * (w.astype(complex) ** -0.5)        # Z @ diag(w^{-1/2})
-    return D1 @ np.conj(Z).T
+    """O^{-1/2} of a Hermitian matrix, reproducing orthogonal.f sqrtm
+    (inv=.TRUE.: Z diag(w^{-1/2}) Z^H). Use the same LAPACK routine the Fortran
+    calls, ZHEEV('V','U'), via scipy so the eigenvectors match rather than the
+    divide-and-conquer ZHEEVD of numpy.linalg.eigh. dmftproj takes 1/sqrt of the
+    eigenvalue as a *complex* sqrt (W_comp = CMPLX(W,0)); reproduce that with a
+    complex power. The result D1 @ conj(Z).T matches the Fortran's ZGEMM('N','T').
+
+    O is rank-deficient here (more correlated spin-orbitals than bands), so the
+    near-null eigenvalues amplify the last-ULP libm difference between gfortran
+    and numpy by ~1e8; ctqmcout therefore matches to ~1e-6, not machine
+    precision (a property of the algorithm, not the port)."""
+    w, Z, info = zheev(O, compute_v=1, lower=0)   # 'V', 'U'
+    D1 = Z * (w.astype(complex) ** -0.5)          # Z @ diag(w^{-1/2})
+    return zgemm(1.0, D1, np.conj(Z), trans_b=1)  # ZGEMM('N','T'): D1 @ conj(Z)^T
 
 
 # --- correlated / included orbital descriptors -------------------------------
@@ -243,9 +251,12 @@ def write_ctqmcout(case):
                 blocks.append(mat_rep[(icr, ik, ispin)])
                 layout.append((icr, ispin, 2 * l + 1))
         D = np.vstack(blocks)                 # ndim x nbnd
-        O = D @ np.conj(D.T)
+        # match the Fortran's exact BLAS calls (orthogonal_wannier_SO): the
+        # near-singular O^{-1/2} amplifies any last-bit difference, so use the
+        # identical ZGEMM trans flags rather than numpy's conj-transpose copies.
+        O = zgemm(1.0, D, D, trans_b=2)        # ZGEMM('N','C'): D @ D^H
         S = _sqrt_inv(O)
-        D_orth = S @ D
+        D_orth = zgemm(1.0, S, D)             # ZGEMM('N','N'): O^{-1/2} @ D
         row = 0
         for icr, ispin, nrows in layout:
             mat_rep[(icr, ik, ispin)] = D_orth[row:row + nrows, :]

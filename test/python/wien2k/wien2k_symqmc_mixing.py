@@ -65,7 +65,7 @@ def _check(indmftpr, ref_npy, extra=(), unit_tol=1e-7):
     data, shells, ops, so = _run(indmftpr, extra)
     ref = np.load(os.path.join(HERE, ref_npy))
     assert data.shape == ref.shape, (data.shape, ref.shape)
-    assert np.max(np.abs(data - ref)) < 1e-6, np.max(np.abs(data - ref))
+    assert np.max(np.abs(data - ref)) < 1e-11, np.max(np.abs(data - ref))
     for op in ops:
         for sh in shells:
             mat = symqmc._shell_matrix(op, sh, _timeinv(op, so))

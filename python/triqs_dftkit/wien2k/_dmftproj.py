@@ -119,10 +119,11 @@ _CUBIC = {
 }
 
 
-def reptrans(basis, l, cast=True):
-    """transmat = <new_i|m>. `cast=True` truncates the cubic harmonics through
-    the single-precision CMPLX cast dmftproj applies (set_ang_trans.f:146);
-    `cast=False` keeps them exact. A complex basis is the exact identity."""
+def reptrans(basis, l, cast=False):
+    """transmat = <new_i|m>, exact double-precision cubic harmonics. dmftproj
+    reads these from full-precision SRC_templates (the precision-fix PR), so the
+    port uses the exact analytic values. A complex basis is the exact identity.
+    `cast` is retained for callers that still want the legacy float32 truncation."""
     if basis == 'cubic' and l in _CUBIC:
         c = _CUBIC[l]
         return c.astype(np.complex64).astype(np.complex128) if cast else c
