@@ -31,16 +31,15 @@ covers ALL INCLUDED shells (l_inc in {1,2}), iterating orb(1:norb) instead of
 crorb(1:ncrorb). The orb ordering is (sort, l, atom) per dmftproj.f:357-387.
 
 The per-shell basis transmat is per sort: a complex shell uses the exact
-identity, a cubic shell uses the single-precision CMPLX cast of the cubic-d
-harmonics (set_ang_trans.f:146), giving 0.70710676908 for 1/sqrt2 — the same
-truncation ctqmcout carries. Mixed within one file (Ca complex exact, Os cubic
-truncated for CaOs2).
+identity, a cubic shell uses the exact double-precision cubic-d harmonics (the
+same full-precision templates dmftproj reads after the precision fix), as
+ctqmcout does. Mixed within one file (Ca complex, Os cubic for CaOs2).
 
 sympar drops three things symqmc/ctqmcout carry: no orbital-description block
 at the top, no ifsplit/irep sub-block selection (always the full matrix), and
 no crorb%ifSOat/correp metadata. It is purely group-theoretic: header, perms,
-optional timeflag line (ifSP), the representation matrices, and — only when
-.not.ifSP — a paramagnetic time-reversal operator per orbital.
+optional timeflag line (ifSP), the representation matrices, and (only when
+.not.ifSP) a paramagnetic time-reversal operator per orbital.
 
 This reference case (CaOs2) is SP+SO: indmftpr SO flag=1 sets ifSO, and
 ifSO=>ifSP, so it exercises the non-mixing 2*(2l+1)=10-wide block-diag spinor
