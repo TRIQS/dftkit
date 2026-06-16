@@ -83,3 +83,11 @@ add_test(NAME Py_wien2k_parproj_python
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_parproj_python APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+# Unit tests for the shared dmftproj machinery (_dmftproj), the module the five
+# case.* generators are built on. Reuses CaOs2 / CaOs2_partial indmftpr + dmftsym.
+add_test(NAME Py_wien2k_dmftproj_common
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_dmftproj_common_python.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_dmftproj_common APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})

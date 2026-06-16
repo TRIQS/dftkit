@@ -55,116 +55,11 @@ to match the committed file the transmat is cast to complex64 before use
 (the dft_tools #148 noise, e.g. 0.70710676908 for 1/sqrt2).
 """
 
-import math
 import os
 import numpy as np
 
-
-# --- list-directed token stream over a Fortran free-form text file -----------
-
-class _Reader:
-    def __init__(self, path):
-        with open(path) as fh:
-            self._lines = fh.read().splitlines()
-        self._i = 0
-
-    def skip(self):
-        self._i += 1
-
-    def record(self):
-        toks = self._lines[self._i].split()
-        self._i += 1
-        return toks
-
-
-def _to_float(tok):
-    return float(tok.replace('D', 'E').replace('d', 'e'))
-
-
-def _to_complex(s):
-    s = s.strip().lstrip('(').rstrip(')')
-    re_s, im_s = s.split(',')
-    return complex(_to_float(re_s), _to_float(im_s))
-
-
-def _read_complex(r):
-    """Read one list-directed complex `(re,im)` value, possibly split over
-    whitespace tokens."""
-    buf = list(r.record())
-    while ')' not in ''.join(buf):
-        buf += r.record()
-    return _to_complex(''.join(buf))
-
-
-def _read_two_complex(r):
-    """Read a record holding two list-directed complex values (Alm, Blm)."""
-    buf = list(r.record())
-    while ''.join(buf).count(')') < 2:
-        buf += r.record()
-    s = ''.join(buf)
-    cut = s.index(')') + 1
-    return _to_complex(s[:cut]), _to_complex(s[cut:])
-
-
-# --- angular basis: cubic d transform transmat = <new_i|lm> ------------------
-# Wien2k cubic d convention dz2, dx2-y2, dxy, dxz, dyz (set_ang_trans cubic);
-# identical to symqmc._CUBIC[2].
-
-_CUBIC = {
-    2: np.array([
-        [0, 0, 1, 0, 0],
-        [2 ** -0.5, 0, 0, 0, 2 ** -0.5],
-        [-(2 ** -0.5), 0, 0, 0, 2 ** -0.5],
-        [0, 2 ** -0.5, 0, -(2 ** -0.5), 0],
-        [0, 2 ** -0.5, 0, 2 ** -0.5, 0],
-    ], dtype=complex),
-}
-
-
-def _reptrans(basis, l):
-    """transmat = <new_i|lm>. dmftproj stores cubic/fromfile coefficients via a
-    single-precision CMPLX cast (set_ang_trans.f:146); reproduce the float32
-    truncation so the written numbers match bit-for-bit."""
-    if basis == 'cubic' and l in _CUBIC:
-        return _CUBIC[l].astype(np.complex64).astype(np.complex128)
-    return np.eye(2 * l + 1, dtype=complex)
-
-
-# --- Wigner D matrix (dmftproj convention, setsym.f dmat) --------------------
-
-def _small_d(l, m, n, b):
-    f1 = (math.factorial(l + m) * math.factorial(l - m)) / \
-         (math.factorial(l + n) * math.factorial(l - n))
-    s = 0.0
-    for t in range(0, 2 * l + 1):
-        if (l - m - t) >= 0 and (l - n - t) >= 0 and (t + n + m) >= 0:
-            f2 = (math.factorial(l + n) * math.factorial(l - n)) / \
-                 (math.factorial(l - m - t) * math.factorial(m + n + t) *
-                  math.factorial(l - n - t) * math.factorial(t))
-            f3 = 1.0 if (2 * l - m - n - 2 * t) == 0 \
-                else math.sin(b / 2) ** (2 * l - m - n - 2 * t)
-            f4 = 1.0 if (2 * t + n + m) == 0 \
-                else math.cos(b / 2) ** (2 * t + n + m)
-            s += (-1) ** (l - m - t) * f2 * f3 * f4
-    return math.sqrt(f1) * s
-
-
-def _dmat(l, a, b, c, det):
-    D = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        for n in range(-l, l + 1):
-            v = np.exp(1j * n * a) * np.exp(1j * m * c) * _small_d(l, m, n, b)
-            if det < -0.5:
-                v *= (-1) ** l
-            D[m + l, n + l] = v
-    return D
-
-
-def _tmat(l):
-    T = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        T[-m + l, m + l] = (-1) ** m
-    return T
+from ._dmftproj import (dmat, fmt_scalar, read_almblm, read_dmftsym,
+                        read_indmftpr, reptrans, select_window, tmat, write_row)
 
 
 def _sqrt_inv(O):
@@ -176,148 +71,6 @@ def _sqrt_inv(O):
     w, Z = np.linalg.eigh(O)
     D1 = Z * (w.astype(complex) ** -0.5)        # Z @ diag(w^{-1/2})
     return D1 @ np.conj(Z).T
-
-
-# --- inputs ------------------------------------------------------------------
-
-def _read_indmftpr(indmftpr):
-    raw = [l.split('!')[0].strip() for l in open(indmftpr)]
-    raw = [l for l in raw if l != '']
-    nsort = int(raw[0].split()[0])
-    mult = [int(x) for x in raw[1].split()][:nsort]
-    lmax = int(raw[2].split()[0])
-    i = 3
-    so = 0
-    sorts = []
-    for isort in range(nsort):
-        basis = raw[i].split()[0]
-        i += 1
-        if basis == 'fromfile':
-            i += 1
-        l_inc = [int(x) for x in raw[i].split()]
-        i += 1
-        ireps = [int(x) for x in raw[i].split()]
-        i += 1
-        correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
-        included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        if any(n > 0 for n in ireps):
-            i += 1
-        if correlated_ls:
-            so = int(raw[i].split()[0])
-            i += 1
-        sorts.append(dict(basis=basis, correlated_ls=correlated_ls,
-                          included_ls=included_ls))
-    last = raw[-1].split()
-    e_bot, e_top = _to_float(last[0]), _to_float(last[1])
-    proj_mode = int(last[2]) if len(last) >= 3 else 0
-    return dict(nsort=nsort, mult=mult, lmax=lmax, sorts=sorts, so=so,
-                e_bot=e_bot, e_top=e_top, proj_mode=proj_mode)
-
-
-def _read_dmftsym(path):
-    lines = open(path).read().split('\n')
-    nsym = int(lines[0].split()[0])
-    perms = [[int(x) for x in lines[1 + i].split()] for i in range(nsym)]
-    starts = [i for i, l in enumerate(lines) if 'Sym. op.' in l]
-    ops = []
-    for k, s in enumerate(starts[:nsym]):
-        toks = lines[s + 1].split()
-        a, b, g = (math.radians(float(x)) for x in toks[:3])
-        iprop = int(toks[3])
-        krotm = np.array([[_to_float(x) for x in lines[s + 2 + r].split()]
-                          for r in range(3)])
-        ops.append(dict(perm=perms[k], a=a, b=b, g=g, iprop=iprop,
-                        krotm=krotm))
-    return nsym, ops
-
-
-# --- almblm parsing ----------------------------------------------------------
-
-def _read_almblm(path, info):
-    nsort = info['nsort']
-    lmax = info['lmax']
-    mult = info['mult']
-    nlm = (lmax + 1) ** 2
-    natom = sum(mult)
-
-    r = _Reader(path)
-    elecn = _to_float(r.record()[0])
-    nk = int(r.record()[0])
-    r.record()                         # nloat
-    eferm = _to_float(r.record()[0])
-
-    nLO = {}
-    ovl_LO_u = {}
-    kp = [None] * nk
-
-    for isrt in range(1, nsort + 1):
-        for l in range(lmax + 1):
-            r.record()                 # u_dot_norm(l)
-            n = int(r.record()[0])
-            nLO[(l, isrt)] = n
-            for ilo in range(1, n + 1):
-                toks = r.record()
-                ovl_LO_u[(ilo, l, isrt)] = _to_float(toks[0])
-        for ik in range(nk):
-            r.skip()                   # "IK = .." banner
-            r.skip()                   # 3-int line
-            head = r.record()
-            nbmin, nbmax = int(head[1]), int(head[2])
-            nb = nbmax - nbmin + 1
-            if kp[ik] is None:
-                kp[ik] = dict(
-                    nbmin=nbmin, nbmax=nbmax, eband=None, weight=None,
-                    Alm=np.zeros((nlm, natom + 1, nb), dtype=complex),
-                    Clm=np.zeros((1, nlm, natom + 1, nb), dtype=complex))
-            eband = np.empty(nb)
-            weight = None
-            for off in range(nb):
-                toks = r.record()
-                if off == 0:
-                    weight = _to_float(toks[0])
-                eband[off] = _to_float(toks[1])
-            eband = eband - eferm
-            if kp[ik]['eband'] is None:
-                kp[ik]['eband'] = eband
-                kp[ik]['weight'] = weight
-            for imu in range(1, mult[isrt - 1] + 1):
-                iatom = sum(mult[:isrt - 1]) + imu
-                r.skip()               # banner
-                r.record()             # idum
-                for off in range(nb):
-                    lm = 0
-                    for l in range(lmax + 1):
-                        for m in range(-l, l + 1):
-                            alm, _blm = _read_two_complex(r)
-                            kp[ik]['Alm'][lm, iatom, off] = alm
-                            for ilo in range(nLO[(l, isrt)]):
-                                clm = _read_complex(r)
-                                kp[ik]['Clm'][ilo, lm, iatom, off] = clm
-                            lm += 1
-
-    return dict(elecn=elecn, eferm=eferm, nk=nk, nlm=nlm, natom=natom,
-                nLO=nLO, ovl_LO_u=ovl_LO_u, kp=kp)
-
-
-# --- band-window selection (set_projections.f, proj_mode==0) -----------------
-
-def _select_window(nbmin, nbmax, eband, e1, e2):
-    included = False
-    nb_bot = nb_top = 0
-    for off, ib in enumerate(range(nbmin, nbmax + 1)):
-        e = eband[off]
-        if not included and e > e1 and e <= e2:
-            included = True
-            nb_bot = ib
-        elif included and e > e2:
-            nb_top = ib - 1
-            break
-        elif ib == nbmax and e > e1 and e <= e2:
-            nb_top = ib
-            included = True
-    if not included:
-        nb_bot = nb_top = 0
-    return included, nb_bot, nb_top
 
 
 # --- correlated / included orbital descriptors -------------------------------
@@ -358,9 +111,9 @@ def _rloc_rotrep(op, l, transmat):
     det2 = krotm[0, 0] * krotm[1, 1] - krotm[0, 1] * krotm[1, 0]
     timeinv = det2 < 0.0
     phase = (g - a) if timeinv else (a + g)
-    D = _dmat(l, a, b, g, float(iprop))
+    D = dmat(l, a, b, g, float(iprop))
     if timeinv:
-        D = _tmat(l) @ np.conj(D)       # setsym.f:320-326 orbital time reversal
+        D = tmat(l) @ np.conj(D)       # setsym.f:320-326 orbital time reversal
     ephase = np.exp(1j * phase / 2)
     d = 2 * l + 1
     rotl = np.zeros((2 * d, 2 * d), dtype=complex)
@@ -375,25 +128,11 @@ def _rloc_rotrep(op, l, transmat):
 
 # --- ctqmcout writer ---------------------------------------------------------
 
-def _fmt(x):
-    """One list-directed real, gfortran-style (leading sign space, ~17 sig)."""
-    return '  %.16E' % float(x)
-
-
-def _w(f, arr):
-    f.write(''.join(_fmt(x) for x in arr) + '\n')
-
-
-def _fmt_scalar(x):
-    x = float(x)
-    return '%.16f' % x if abs(x) < 1e5 else '%.16E' % x
-
-
 def write_ctqmcout(case):
     """Read <case>.almblm{up,dn}, <case>.indmftpr, <case>.struct,
     <case>.dmftsym and write <case>.ctqmcout in the dmftproj format."""
-    info = _read_indmftpr(case + '.indmftpr')
-    nsym, ops = _read_dmftsym(case + '.dmftsym')
+    info = read_indmftpr(case + '.indmftpr')
+    nsym, ops = read_dmftsym(case + '.dmftsym')
 
     up, dn = case + '.almblmup', case + '.almblmdn'
     if os.path.exists(up) and os.path.exists(dn):
@@ -404,7 +143,7 @@ def write_ctqmcout(case):
     ifSO = bool(info['so'])
     ns = 2 if ifSP else 1
 
-    spins = [_read_almblm(p, info) for p in spin_files]
+    spins = [read_almblm(p, info, projectors=True) for p in spin_files]
     nk = spins[0]['nk']
     elecn = spins[0]['elecn']
 
@@ -421,14 +160,14 @@ def write_ctqmcout(case):
     windows = []
     for ik in range(nk):
         kp = spins[0]['kp'][ik]
-        windows.append(_select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
+        windows.append(select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
                                      info['e_bot'], info['e_top']))
 
     # window below e_bot (for qbbot)
     win_below = []
     for ik in range(nk):
         kp = spins[0]['kp'][ik]
-        win_below.append(_select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
+        win_below.append(select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
                                        -1e6, info['e_bot']))
 
     # qbbot: point integration over bands below e_bot, is=1 only under SO
@@ -441,7 +180,7 @@ def write_ctqmcout(case):
         if ifSO:
             break
 
-    transmats = {(cr['l'], cr['sort']): _reptrans(cr['basis'], cr['l'])
+    transmats = {(cr['l'], cr['sort']): reptrans(cr['basis'], cr['l'])
                  for cr in crorbs}
 
     # rotloc Euler angles per crorb: the symmetry op mapping the representative
@@ -465,7 +204,7 @@ def write_ctqmcout(case):
         sort = cr['sort']
         transmat = transmats[(l, sort)]
         op = rotloc_op[icr]
-        rot = _dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+        rot = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
         for ik in range(nk):
             incl, nb_bot, nb_top = windows[ik]
             if not incl:
@@ -527,8 +266,8 @@ def write_ctqmcout(case):
         f.write('%6d\n' % nk)
         f.write('%6d\n' % (1 if ifSP else 0))
         f.write('%6d\n' % (1 if ifSO else 0))
-        f.write(' %s\n' % _fmt_scalar(qbbot))
-        f.write(' %s\n' % _fmt_scalar(elecn))
+        f.write(' %s\n' % fmt_scalar(qbbot))
+        f.write(' %s\n' % fmt_scalar(elecn))
 
         f.write('%6d\n' % norb)
         for o in orbs:
@@ -545,9 +284,9 @@ def write_ctqmcout(case):
         # Rloc block per crorb (non-mixing SP+SO whole shell)
         for rotrep, timeinv in rloc_blocks:
             for m in range(rotrep.shape[0]):
-                _w(f, rotrep[m, :].real)
+                write_row(f, rotrep[m, :].real)
             for m in range(rotrep.shape[0]):
-                _w(f, rotrep[m, :].imag)
+                write_row(f, rotrep[m, :].imag)
             f.write('%6d\n' % (1 if timeinv else 0))
 
         # complex-harmonics -> basis transform block (crorb%first only)
@@ -562,9 +301,9 @@ def write_ctqmcout(case):
             spinrot[d:, d:] = transmat
             f.write('%6d %6d \n' % (1, 2 * d))
             for m in range(2 * d):
-                _w(f, spinrot[m, :].real)
+                write_row(f, spinrot[m, :].real)
             for m in range(2 * d):
-                _w(f, spinrot[m, :].imag)
+                write_row(f, spinrot[m, :].imag)
 
         # number of bands per k (skip is=2 under SO)
         for ispin in range(ns):
@@ -581,15 +320,15 @@ def write_ctqmcout(case):
                 for ispin in range(ns):
                     P = mat_rep[(icr, ik, ispin)]
                     for mi in range(2 * l + 1):
-                        _w(f, P[mi, :].real)
+                        write_row(f, P[mi, :].real)
                 for ispin in range(ns):
                     P = mat_rep[(icr, ik, ispin)]
                     for mi in range(2 * l + 1):
-                        _w(f, P[mi, :].imag)
+                        write_row(f, P[mi, :].imag)
 
         # k-weights
         for ik in range(nk):
-            f.write(' %s\n' % _fmt_scalar(spins[0]['kp'][ik]['weight']))
+            f.write(' %s\n' % fmt_scalar(spins[0]['kp'][ik]['weight']))
 
         # H(k) eigenvalues (skip is=2 under SO)
         for ispin in range(ns):
@@ -599,4 +338,4 @@ def write_ctqmcout(case):
                 incl, nb_bot, nb_top = windows[ik]
                 kp = spins[ispin]['kp'][ik]
                 for ib in range(nb_bot, nb_top + 1):
-                    f.write(' %s\n' % _fmt_scalar(kp['eband'][ib - kp['nbmin']]))
+                    f.write(' %s\n' % fmt_scalar(kp['eband'][ib - kp['nbmin']]))

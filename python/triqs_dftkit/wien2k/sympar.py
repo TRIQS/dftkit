@@ -47,128 +47,29 @@ ifSO=>ifSP, so it exercises the non-mixing 2*(2l+1)=10-wide block-diag spinor
 path and writes the timeflag line; the paramagnetic tail is absent.
 """
 
-import math
 import os
 import numpy as np
 
-
-# --- angular bases -----------------------------------------------------------
-# transpose(P) = <new|m>, m = -l..l. dmftproj stores cubic/fromfile coefficients
-# via a single-precision CMPLX cast (set_ang_trans.f:146); reproduce the
-# float32 truncation so the written numbers match (0.70710676908 for 1/sqrt2).
-# A complex basis is the exact identity (no cast).
-
-_CUBIC = {
-    1: np.array([[0, 1, 0], [-1j, 0, -1j], [1, 0, -1]], dtype=complex),
-    2: np.array([
-        [0, 0, 1, 0, 0],
-        [2 ** -0.5, 0, 0, 0, 2 ** -0.5],
-        [-(2 ** -0.5), 0, 0, 0, 2 ** -0.5],
-        [0, 2 ** -0.5, 0, -(2 ** -0.5), 0],
-        [0, 2 ** -0.5, 0, 2 ** -0.5, 0],
-    ], dtype=complex),
-}
+from ._dmftproj import (dmat, fmt, read_dmftsym, read_indmftpr, reptrans,
+                        timeinv_orbital, tmat, write_row)
 
 
-def _reptrans(basis, l):
-    if basis == 'cubic' and l in _CUBIC:
-        return _CUBIC[l].astype(np.complex64).astype(np.complex128)
-    return np.eye(2 * l + 1, dtype=complex)
+# --- included shells ---------------------------------------------------------
 
-
-# --- Wigner D matrix (dmftproj convention, setsym.f) -------------------------
-
-def _small_d(l, m, n, b):
-    f1 = (math.factorial(l + m) * math.factorial(l - m)) / \
-         (math.factorial(l + n) * math.factorial(l - n))
-    s = 0.0
-    for t in range(0, 2 * l + 1):
-        if (l - m - t) >= 0 and (l - n - t) >= 0 and (t + n + m) >= 0:
-            f2 = (math.factorial(l + n) * math.factorial(l - n)) / \
-                 (math.factorial(l - m - t) * math.factorial(m + n + t) *
-                  math.factorial(l - n - t) * math.factorial(t))
-            f3 = 1.0 if (2 * l - m - n - 2 * t) == 0 \
-                else math.sin(b / 2) ** (2 * l - m - n - 2 * t)
-            f4 = 1.0 if (2 * t + n + m) == 0 \
-                else math.cos(b / 2) ** (2 * t + n + m)
-            s += (-1) ** (l - m - t) * f2 * f3 * f4
-    return math.sqrt(f1) * s
-
-
-def _dmat(l, a, b, c, det):
-    D = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        for n in range(-l, l + 1):
-            v = np.exp(1j * n * a) * np.exp(1j * m * c) * _small_d(l, m, n, b)
-            if det < -0.5:
-                v *= (-1) ** l
-            D[m + l, n + l] = v
-    return D
-
-
-def _tmat(l):
-    """T[m, -m] = (-1)^m, complex conjugation in the |lm> basis (timeinv.f)."""
-    T = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        T[-m + l, m + l] = (-1) ** m
-    return T
-
-
-def _timeinv_orbital(l, mat):
-    return _tmat(l) @ np.conj(mat)
-
-
-# --- inputs ------------------------------------------------------------------
-
-def _read_indmftpr(indmftpr):
-    """Return one entry per INCLUDED shell (l_inc in {1,2}), one per atom of its
-    sort, in orb order (sort, l, atom). Each shell carries l, basis name and the
-    transform P. Also returns the SO flag."""
-    raw = [l.split('!')[0].strip() for l in open(indmftpr)]
-    raw = [l for l in raw if l != '']
-    nsort = int(raw[0].split()[0])
-    mult = [int(x) for x in raw[1].split()][:nsort]
-    i = 3
-    so = 0
+def _included_shells(info):
+    """One entry per INCLUDED shell (l_inc in {1,2}), one per atom of its sort,
+    in orb order (sort, l, atom). Each shell carries l, basis name and the
+    transform P (the single-precision-cast cubic harmonics dmftproj writes)."""
     shells = []
-    for isort in range(nsort):
-        basis = raw[i].split()[0]
-        i += 1
-        if basis == 'fromfile':
-            i += 1
-        l_inc = [int(x) for x in raw[i].split()]
-        i += 1
-        ireps = [int(x) for x in raw[i].split()]
-        i += 1
-        correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
-        included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        if any(n > 0 for n in ireps):
-            i += 1                          # skip the correps line
-        if correlated_ls:
-            so = int(raw[i].split()[0])     # SO flag follows a correlated sort
-            i += 1
-        for l in included_ls:
-            P = _reptrans(basis, l)
-            for imu in range(1, mult[isort] + 1):
-                atom = sum(mult[:isort]) + imu
+    for isort in range(info['nsort']):
+        s = info['sorts'][isort]
+        for l in s['included_ls']:
+            P = reptrans(s['basis'], l)
+            for imu in range(1, info['mult'][isort] + 1):
+                atom = sum(info['mult'][:isort]) + imu
                 shells.append(dict(l=l, sort=isort + 1, atom=atom,
-                                   basis=basis, P=P))
-    return shells, so
-
-
-def _read_dmftsym(path):
-    lines = open(path).read().split('\n')
-    nsym = int(lines[0].split()[0])
-    perms = [[int(x) for x in lines[1 + i].split()] for i in range(nsym)]
-    starts = [i for i, l in enumerate(lines) if 'Sym. op.' in l]
-    ops = []
-    for k, s in enumerate(starts[:nsym]):
-        toks = lines[s + 1].split()
-        a, b, c = (math.radians(float(x)) for x in toks[:3])
-        krotm = np.array([[float(x.replace('D', 'E').replace('d', 'e'))
-                           for x in lines[s + 2 + r].split()] for r in range(3)])
-        ops.append(dict(perm=perms[k], a=a, b=b, c=c, krotm=krotm))
-    return nsym, ops
+                                   basis=s['basis'], P=P))
+    return shells
 
 
 # --- matrix construction (shared with symqmc) --------------------------------
@@ -188,9 +89,9 @@ def _nonmixing_matrix(op, shell, ti):
     block-diagonal over spin, with the orbital time-reversal operator on the
     magnetic operations (setsym.f, outputqmc.f:1292-1339)."""
     l, P = shell['l'], shell['P']
-    rotl = _dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
     if ti:
-        rotl = _timeinv_orbital(l, rotl)
+        rotl = timeinv_orbital(l, rotl)
     rotrep = P @ rotl @ np.conj(P.T)
     e = np.exp(1j * _phase(op, ti) / 2)
     d = 2 * l + 1
@@ -209,20 +110,11 @@ def _shell_matrix(op, shell, ti):
 
 # --- output ------------------------------------------------------------------
 
-def _fmt(x):
-    """One gfortran list-directed real (leading sign space, ~17 sig figs)."""
-    return '  %.16E' % float(x)
-
-
-def _w(f, arr):
-    f.write(''.join(_fmt(x) for x in arr) + '\n')
-
-
 def _write_matrix(f, mat):
     for m in range(mat.shape[0]):
-        _w(f, mat[m, :].real)
+        write_row(f, mat[m, :].real)
     for m in range(mat.shape[0]):
-        _w(f, mat[m, :].imag)
+        write_row(f, mat[m, :].imag)
 
 
 def write_sympar(case):
@@ -232,12 +124,13 @@ def write_sympar(case):
     SO flag, exactly as oubwin/symqmc/ctqmcout. For SP+SO the file carries the
     timeflag line and 2*(2l+1)-wide block-diag spinor matrices; the paramagnetic
     time-reversal tail is written only when .not.ifSP."""
-    shells, so = _read_indmftpr(case + '.indmftpr')
+    info = read_indmftpr(case + '.indmftpr')
+    shells, so = _included_shells(info), info['so']
     if any(sh['basis'] == 'fromfile' for sh in shells):
         raise NotImplementedError(
             'sympar for fromfile/mixing bases is not yet covered by a test '
             'fixture; cubic and complex bases are supported')
-    nsym, ops = _read_dmftsym(case + '.dmftsym')
+    nsym, ops = read_dmftsym(case + '.dmftsym')
     natom = len(ops[0]['perm'])
 
     ifSP = os.path.exists(case + '.almblmup') and os.path.exists(case + '.almblmdn')
@@ -262,8 +155,8 @@ def write_sympar(case):
                 l = sh['l']
                 ti = bool(timeflag[isym])
                 if l == 0 and not (ifSP and ifSO):
-                    f.write(_fmt(1.0) + '\n')
-                    f.write(_fmt(0.0) + '\n')
+                    f.write(fmt(1.0) + '\n')
+                    f.write(fmt(0.0) + '\n')
                     continue
                 _write_matrix(f, _shell_matrix(op, sh, ti))
 
@@ -271,10 +164,10 @@ def write_sympar(case):
             for sh in shells:
                 l = sh['l']
                 if l == 0:
-                    f.write(_fmt(1.0) + '\n')
-                    f.write(_fmt(0.0) + '\n')
+                    f.write(fmt(1.0) + '\n')
+                    f.write(fmt(0.0) + '\n')
                     continue
-                tm = _tmat(l)
+                tm = tmat(l)
                 op = sh['P'] @ tm @ sh['P'].T
                 ident = np.eye(2 * l + 1, dtype=complex)
                 time_op = op @ np.conj(ident)

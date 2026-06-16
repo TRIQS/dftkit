@@ -47,163 +47,48 @@ set_ang_trans.f), so its case.symqmc carries a ~1e-7 error there; this generator
 is full double precision.
 """
 
-import math
-import os
 import numpy as np
 
-# --- angular bases (transpose(P) = <new|m>, m = -l..l) -----------------------
-
-_COMPLEX = {l: np.eye(2 * l + 1, dtype=complex) for l in range(4)}
-
-# standard cubic harmonics, Wien2k convention
-_CUBIC = {
-    1: np.array([[0, 1, 0], [-1j, 0, -1j], [1, 0, -1]], dtype=complex) / 1.0,
-    2: np.array([
-        [0, 0, 1, 0, 0],
-        [2 ** -0.5, 0, 0, 0, 2 ** -0.5],
-        [-(2 ** -0.5), 0, 0, 0, 2 ** -0.5],
-        [0, 2 ** -0.5, 0, -(2 ** -0.5), 0],
-        [0, 2 ** -0.5, 0, 2 ** -0.5, 0],
-    ], dtype=complex),
-}
+from ._dmftproj import (dmat, read_dmftsym, read_fromfile, read_indmftpr,
+                        reptrans, tmat, timeinv_orbital)
 
 
-def _reptrans(basis, l):
-    if basis == 'cubic' and l in _CUBIC:
-        return _CUBIC[l]
-    return _COMPLEX[l]
+# --- correlated shells -------------------------------------------------------
+
+def _correlated_shells(info):
+    """One entry per correlated atom (l_inc==2), in sort order. Each shell
+    carries l, basis name, its transform matrix P = <new|m> and a mixing flag
+    (True for a spin-coupling fromfile basis). symqmc builds its symmetry
+    matrices from the EXACT cubic harmonics (no single-precision cast)."""
+    shells = []
+    for isort in range(info['nsort']):
+        s = info['sorts'][isort]
+        basis = s['basis']
+        for l in s['correlated_ls']:
+            if basis == 'fromfile':
+                P, mixing = read_fromfile(s['sourcefile'], l)
+            else:
+                P, mixing = reptrans(basis, l, cast=False), False
+            for _ in range(info['mult'][isort]):
+                shells.append(dict(l=l, basis=basis, P=P, mixing=mixing))
+    return shells
 
 
-# --- Wigner D matrix (dmftproj convention, setsym.f) -------------------------
-
-def _small_d(l, m, n, b):
-    f1 = (math.factorial(l + m) * math.factorial(l - m)) / \
-         (math.factorial(l + n) * math.factorial(l - n))
-    s = 0.0
-    for t in range(0, 2 * l + 1):
-        if (l - m - t) >= 0 and (l - n - t) >= 0 and (t + n + m) >= 0:
-            f2 = (math.factorial(l + n) * math.factorial(l - n)) / \
-                 (math.factorial(l - m - t) * math.factorial(m + n + t) *
-                  math.factorial(l - n - t) * math.factorial(t))
-            f3 = 1.0 if (2 * l - m - n - 2 * t) == 0 else math.sin(b / 2) ** (2 * l - m - n - 2 * t)
-            f4 = 1.0 if (2 * t + n + m) == 0 else math.cos(b / 2) ** (2 * t + n + m)
-            s += (-1) ** (l - m - t) * f2 * f3 * f4
-    return math.sqrt(f1) * s
-
-
-def _dmat(l, a, b, c, det):
-    D = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        for n in range(-l, l + 1):
-            v = np.exp(1j * n * a) * np.exp(1j * m * c) * _small_d(l, m, n, b)
-            if det < -0.5:
-                v *= (-1) ** l
-            D[m + l, n + l] = v
-    return D
-
-
-def _tmat(l):
-    """Complex-conjugation operator in the spherical-harmonic basis,
-    T[m, -m] = (-1)^m (timeinv.f)."""
-    T = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        T[-m + l, m + l] = (-1) ** m
-    return T
-
-
-def _timeinv_orbital(l, mat):
-    return _tmat(l) @ np.conj(mat)
-
-
-# --- fromfile angular basis ---------------------------------------------------
-
-def _read_fromfile(path, l):
-    """Parse a dmftproj fromfile basis (each line: the coefficients of a new
-    basis vector in {|m,up>, |m,dn>}, m = -l..l, real/imag interleaved; '*'
-    marks the end of an irep). Return (P, mixing) where P = <new|m> is the
-    transform matrix (reptrans.transmat), full 2(2l+1) for a spin-mixing basis
-    or the (2l+1) up/up block otherwise."""
-    n = 2 * (2 * l + 1)
-    rows = []
-    for line in open(path):
-        line = line.rstrip('\n')
-        if not line.strip():
-            continue
-        body = line[1:]
-        vals = [float(x) for x in body.split()][:2 * n]
-        rows.append([vals[2 * k] + 1j * vals[2 * k + 1] for k in range(n)])
-        if len(rows) == n:
-            break
-    R = np.array(rows)                       # R[i, :] = |new_i> in old basis
-    d = 2 * l + 1
-    up_up, up_dn = R[:d, :d], R[:d, d:]
-    dn_up, dn_dn = R[d:, :d], R[d:, d:]
-    mixing = not (np.allclose(dn_dn, up_up) and
-                  np.allclose(up_dn, 0) and np.allclose(dn_up, 0))
-    P = np.conj(R) if mixing else np.conj(up_up)   # <new|m> = conj(<m|new>)
-    return P, mixing
-
-
-# --- input parsing -----------------------------------------------------------
-
-def _read_dmftsym(path):
-    lines = open(path).read().split('\n')
-    nsym = int(lines[0].split()[0])
-    perms = [[int(x) for x in lines[1 + i].split()] for i in range(nsym)]
-    rest = lines[1 + nsym:]
-    starts = [i for i, l in enumerate(rest) if 'Sym. op.' in l]
-    ops = []
-    for k, s in enumerate(starts):
-        ang = rest[s + 1].split()
-        a, b, c = (math.radians(float(x)) for x in ang[:3])
-        krotm = np.array([[float(x) for x in rest[s + 2 + r].split()] for r in range(3)])
-        ops.append(dict(perm=perms[k], a=a, b=b, c=c, krotm=krotm))
-    return nsym, ops
+# The symqmc test reaches into these two names directly; keep them as the
+# module's parsing entry points.
+_read_dmftsym = read_dmftsym
 
 
 def _read_correlated_shells(indmftpr, struct):
-    """Return the list of correlated shells, one entry per correlated atom, plus
-    the SO flag, from case.indmftpr and case.struct multiplicities. Each shell
-    carries l, the basis name, its transform matrix P = <new|m> and a mixing
-    flag (True for a spin-coupling fromfile basis)."""
-    raw = [l.split('!')[0].strip() for l in open(indmftpr)]
-    raw = [l for l in raw if l != '']
-    nsort = int(raw[0].split()[0])
-    mult = [int(x) for x in raw[1].split()][:nsort]
-    i = 3
-    so = 0
-    shells = []
-    for isort in range(nsort):
-        basis = raw[i].split()[0]
-        i += 1
-        sourcefile = None
-        if basis == 'fromfile':
-            sourcefile = os.path.join(os.path.dirname(indmftpr), raw[i])
-            i += 1
-        l_inc = [int(x) for x in raw[i].split()]
-        i += 1
-        ireps = [int(x) for x in raw[i].split()]
-        i += 1
-        correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
-        if any(n > 0 for n in ireps):
-            i += 1                       # skip the correps line
-        if correlated_ls:
-            so = int(raw[i].split()[0])  # SO flag follows a correlated sort
-            i += 1
-            for l in correlated_ls:
-                if basis == 'fromfile':
-                    P, mixing = _read_fromfile(sourcefile, l)
-                else:
-                    P, mixing = _reptrans(basis, l), False
-                for _ in range(mult[isort]):
-                    shells.append(dict(l=l, basis=basis, P=P, mixing=mixing))
-    return shells, so
+    info = read_indmftpr(indmftpr)
+    return _correlated_shells(info), info['so']
 
 
 def write_symqmc(case):
     """Write <case>.symqmc from <case>.dmftsym, <case>.indmftpr, <case>.struct."""
-    nsym, ops = _read_dmftsym(case + '.dmftsym')
-    shells, so = _read_correlated_shells(case + '.indmftpr', case + '.struct')
+    nsym, ops = read_dmftsym(case + '.dmftsym')
+    info = read_indmftpr(case + '.indmftpr')
+    shells, so = _correlated_shells(info), info['so']
     natom = len(ops[0]['perm'])
 
     timeinv = []
@@ -247,9 +132,9 @@ def _nonmixing_matrix(op, shell, ti):
     """Spin-diagonal basis: the up/up block scaled by +-(a+g)/2, with the
     orbital time-reversal operator on the magnetic operations."""
     l, P = shell['l'], shell['P']
-    rotl = _dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
     if ti:
-        rotl = _timeinv_orbital(l, rotl)
+        rotl = timeinv_orbital(l, rotl)
     rotrep = P @ rotl @ np.conj(P.T)
     e = np.exp(1j * _phase(op, ti) / 2)
     d = 2 * l + 1
@@ -265,7 +150,7 @@ def _mixing_matrix(op, shell, ti):
     magnetic operations); the spinor time-reversal -i sigma_y (x) T is then
     applied to the magnetic operations (setsym.f, timeinv.f)."""
     l, P = shell['l'], shell['P']
-    rotl = _dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
     e = np.exp(1j * _phase(op, ti) / 2)
     d = 2 * l + 1
     spinrot = np.zeros((2 * d, 2 * d), dtype=complex)
@@ -277,7 +162,7 @@ def _mixing_matrix(op, shell, ti):
         spinrot[d:, d:] = np.conj(e) * rotl
     rotrep = P @ spinrot @ np.conj(P.T)
     if ti:
-        tm = _tmat(l)
+        tm = tmat(l)
         tinv = np.zeros((2 * d, 2 * d), dtype=complex)
         tinv[:d, d:] = -tm
         tinv[d:, :d] = tm

@@ -58,110 +58,8 @@ import math
 import os
 import numpy as np
 
-
-# --- list-directed token stream over a Fortran free-form text file -----------
-
-class _Reader:
-    def __init__(self, path):
-        with open(path) as fh:
-            self._lines = fh.read().splitlines()
-        self._i = 0
-
-    def skip(self):
-        self._i += 1
-
-    def record(self):
-        toks = self._lines[self._i].split()
-        self._i += 1
-        return toks
-
-
-def _to_float(tok):
-    return float(tok.replace('D', 'E').replace('d', 'e'))
-
-
-def _to_complex(s):
-    s = s.strip().lstrip('(').rstrip(')')
-    re_s, im_s = s.split(',')
-    return complex(_to_float(re_s), _to_float(im_s))
-
-
-def _read_complex(r):
-    buf = list(r.record())
-    while ')' not in ''.join(buf):
-        buf += r.record()
-    return _to_complex(''.join(buf))
-
-
-def _read_two_complex(r):
-    """Read a record holding two list-directed complex values (Alm, Blm)."""
-    buf = list(r.record())
-    while ''.join(buf).count(')') < 2:
-        buf += r.record()
-    s = ''.join(buf)
-    cut = s.index(')') + 1
-    return _to_complex(s[:cut]), _to_complex(s[cut:])
-
-
-# --- angular basis: cubic d transform transmat = <new_i|lm> ------------------
-
-_CUBIC = {
-    2: np.array([
-        [0, 0, 1, 0, 0],
-        [2 ** -0.5, 0, 0, 0, 2 ** -0.5],
-        [-(2 ** -0.5), 0, 0, 0, 2 ** -0.5],
-        [0, 2 ** -0.5, 0, -(2 ** -0.5), 0],
-        [0, 2 ** -0.5, 0, 2 ** -0.5, 0],
-    ], dtype=complex),
-}
-
-
-def _reptrans(basis, l):
-    """transmat = <new_i|lm>. dmftproj stores the cubic coefficients via a
-    single-precision CMPLX cast (set_ang_trans.f:146); reproduce the float32
-    truncation so the written numbers match bit-for-bit."""
-    if basis == 'cubic' and l in _CUBIC:
-        return _CUBIC[l].astype(np.complex64).astype(np.complex128)
-    return np.eye(2 * l + 1, dtype=complex)
-
-
-# --- Wigner D matrix (dmftproj convention, setsym.f dmat) --------------------
-
-def _small_d(l, m, n, b):
-    f1 = (math.factorial(l + m) * math.factorial(l - m)) / \
-         (math.factorial(l + n) * math.factorial(l - n))
-    s = 0.0
-    for t in range(0, 2 * l + 1):
-        if (l - m - t) >= 0 and (l - n - t) >= 0 and (t + n + m) >= 0:
-            f2 = (math.factorial(l + n) * math.factorial(l - n)) / \
-                 (math.factorial(l - m - t) * math.factorial(m + n + t) *
-                  math.factorial(l - n - t) * math.factorial(t))
-            f3 = 1.0 if (2 * l - m - n - 2 * t) == 0 \
-                else math.sin(b / 2) ** (2 * l - m - n - 2 * t)
-            f4 = 1.0 if (2 * t + n + m) == 0 \
-                else math.cos(b / 2) ** (2 * t + n + m)
-            s += (-1) ** (l - m - t) * f2 * f3 * f4
-    return math.sqrt(f1) * s
-
-
-def _dmat(l, a, b, c, det):
-    D = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        for n in range(-l, l + 1):
-            v = np.exp(1j * n * a) * np.exp(1j * m * c) * _small_d(l, m, n, b)
-            if det < -0.5:
-                v *= (-1) ** l
-            D[m + l, n + l] = v
-    return D
-
-
-def _tmat(l):
-    """Complex-conjugation operator in the spherical-harmonic basis,
-    T[m, -m] = (-1)^m (timeinv.f)."""
-    T = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        T[-m + l, m + l] = (-1) ** m
-    return T
+from ._dmftproj import (dmat, read_almblm, read_dmftsym, read_indmftpr,
+                        reptrans, select_window, tmat, write_row)
 
 
 def _sqrtm_real_sym(O):
@@ -172,183 +70,6 @@ def _sqrtm_real_sym(O):
     w, Z = np.linalg.eigh(O)
     D1 = Z * np.sqrt(w.astype(complex))
     return (D1 @ Z.T).real
-
-
-# --- inputs ------------------------------------------------------------------
-
-def _read_indmftpr(indmftpr):
-    raw = [l.split('!')[0].strip() for l in open(indmftpr)]
-    raw = [l for l in raw if l != '']
-    nsort = int(raw[0].split()[0])
-    mult = [int(x) for x in raw[1].split()][:nsort]
-    lmax = int(raw[2].split()[0])
-    i = 3
-    so = 0
-    sorts = []
-    for isort in range(nsort):
-        basis = raw[i].split()[0]
-        i += 1
-        if basis == 'fromfile':
-            i += 1
-        l_inc = [int(x) for x in raw[i].split()]
-        i += 1
-        ireps = [int(x) for x in raw[i].split()]
-        i += 1
-        correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
-        included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        if any(n > 0 for n in ireps):
-            i += 1
-        if correlated_ls:
-            so = int(raw[i].split()[0])
-            i += 1
-        sorts.append(dict(basis=basis, correlated_ls=correlated_ls,
-                          included_ls=included_ls))
-    last = raw[-1].split()
-    e_bot, e_top = _to_float(last[0]), _to_float(last[1])
-    proj_mode = int(last[2]) if len(last) >= 3 else 0
-    return dict(nsort=nsort, mult=mult, lmax=lmax, sorts=sorts, so=so,
-                e_bot=e_bot, e_top=e_top, proj_mode=proj_mode)
-
-
-def _read_dmftsym(path):
-    """Symmetry operations and the per-sort representative Rloc rotation from
-    case.dmftsym. The symop block carries (perm, a, b, g, iprop, krotm); the
-    'Global->local' tail carries the representative rotloc krotm + Euler angles
-    per sort (setsym.f:437-455)."""
-    lines = open(path).read().split('\n')
-    nsym = int(lines[0].split()[0])
-    perms = [[int(x) for x in lines[1 + i].split()] for i in range(nsym)]
-    starts = [i for i, l in enumerate(lines) if 'Sym. op.' in l]
-    ops = []
-    for k, s in enumerate(starts[:nsym]):
-        toks = lines[s + 1].split()
-        a, b, g = (math.radians(float(x)) for x in toks[:3])
-        iprop = int(toks[3])
-        krotm = np.array([[_to_float(x) for x in lines[s + 2 + r].split()]
-                          for r in range(3)])
-        ops.append(dict(perm=perms[k], a=a, b=b, g=g, iprop=iprop,
-                        krotm=krotm))
-    # Global->local representative rotloc per sort.
-    gl = next(i for i, l in enumerate(lines) if 'Global->local' in l)
-    rotloc_ref = []
-    j = gl + 1
-    while len(rotloc_ref) < nsym and j < len(lines):
-        if lines[j].strip() == '' or not lines[j].split()[0].lstrip('-').isdigit():
-            j += 1
-            continue
-        # sort index line, then 3 krotm rows, then the Euler/iprop line.
-        if len(lines[j].split()) == 1:
-            krotm = np.array([[_to_float(x) for x in lines[j + 1 + r].split()]
-                              for r in range(3)])
-            ang = lines[j + 4].split()
-            a, b, g = (math.radians(float(x)) for x in ang[:3])
-            iprop = int(ang[3])
-            rotloc_ref.append(dict(krotm=krotm, a=a, b=b, g=g, iprop=iprop))
-            j += 5
-        else:
-            j += 1
-    return nsym, ops, rotloc_ref
-
-
-# --- almblm parsing ----------------------------------------------------------
-
-def _read_almblm(path, info):
-    """Read one spin's almblm file. Keeps Alm, Blm and Clm (parproj needs the
-    full radial vector), plus u_dot_norm, ovl_LO_u, ovl_LO_udot for the s12
-    build and the per-band tetrahedron weights for the density matrix."""
-    nsort = info['nsort']
-    lmax = info['lmax']
-    mult = info['mult']
-    nlm = (lmax + 1) ** 2
-    natom = sum(mult)
-    nloat_max = 1  # max nLO over (l, sort); grown below
-
-    r = _Reader(path)
-    elecn = _to_float(r.record()[0])
-    nk = int(r.record()[0])
-    r.record()                         # nloat
-    eferm = _to_float(r.record()[0])
-
-    nLO = {}
-    u_dot_norm = {}
-    ovl_LO_u = {}
-    ovl_LO_udot = {}
-    kp = [None] * nk
-
-    for isrt in range(1, nsort + 1):
-        for l in range(lmax + 1):
-            u_dot_norm[(l, isrt)] = _to_float(r.record()[0])
-            n = int(r.record()[0])
-            nLO[(l, isrt)] = n
-            nloat_max = max(nloat_max, n)
-            for ilo in range(1, n + 1):
-                toks = r.record()
-                ovl_LO_u[(ilo, l, isrt)] = _to_float(toks[0])
-                ovl_LO_udot[(ilo, l, isrt)] = _to_float(toks[1])
-        for ik in range(nk):
-            r.skip()                   # "IK = .." banner
-            r.skip()                   # 3-int line
-            head = r.record()
-            nbmin, nbmax = int(head[1]), int(head[2])
-            nb = nbmax - nbmin + 1
-            if kp[ik] is None:
-                kp[ik] = dict(
-                    nbmin=nbmin, nbmax=nbmax, eband=None, weight=None,
-                    tetr=None,
-                    Alm=np.zeros((nlm, natom + 1, nb), dtype=complex),
-                    Blm=np.zeros((nlm, natom + 1, nb), dtype=complex),
-                    Clm=np.zeros((4, nlm, natom + 1, nb), dtype=complex))
-            eband = np.empty(nb)
-            tetr = np.empty(nb)
-            for off in range(nb):
-                toks = r.record()
-                tetr[off] = _to_float(toks[0])
-                eband[off] = _to_float(toks[1])
-            eband = eband - eferm
-            if kp[ik]['eband'] is None:
-                kp[ik]['eband'] = eband
-                kp[ik]['weight'] = tetr[0]
-                kp[ik]['tetr'] = tetr
-            for imu in range(1, mult[isrt - 1] + 1):
-                iatom = sum(mult[:isrt - 1]) + imu
-                r.skip()               # banner
-                r.record()             # idum
-                for off in range(nb):
-                    lm = 0
-                    for l in range(lmax + 1):
-                        for m in range(-l, l + 1):
-                            alm, blm = _read_two_complex(r)
-                            kp[ik]['Alm'][lm, iatom, off] = alm
-                            kp[ik]['Blm'][lm, iatom, off] = blm
-                            for ilo in range(nLO[(l, isrt)]):
-                                clm = _read_complex(r)
-                                kp[ik]['Clm'][ilo, lm, iatom, off] = clm
-                            lm += 1
-
-    return dict(elecn=elecn, eferm=eferm, nk=nk, nlm=nlm, natom=natom,
-                nLO=nLO, u_dot_norm=u_dot_norm, ovl_LO_u=ovl_LO_u,
-                ovl_LO_udot=ovl_LO_udot, kp=kp)
-
-
-# --- band-window selection (set_projections.f, proj_mode==0) -----------------
-
-def _select_window(nbmin, nbmax, eband, e1, e2):
-    included = False
-    nb_bot = nb_top = 0
-    for off, ib in enumerate(range(nbmin, nbmax + 1)):
-        e = eband[off]
-        if not included and e > e1 and e <= e2:
-            included = True
-            nb_bot = ib
-        elif included and e > e2:
-            nb_top = ib - 1
-            break
-        elif ib == nbmax and e > e1 and e <= e2:
-            nb_top = ib
-            included = True
-    if not included:
-        nb_bot = nb_top = 0
-    return included, nb_bot, nb_top
 
 
 # --- included orbital descriptors --------------------------------------------
@@ -399,67 +120,16 @@ def _srot_rotrep_nonmixing(op, l, transmat, ifSP, ifSO):
     else:
         timeinv = False
         phase = 0.0
-    rotl = _dmat(l, a, b, g, float(iprop))
+    rotl = dmat(l, a, b, g, float(iprop))
     rotrep = transmat @ rotl @ np.conj(transmat.T)
     if timeinv:
         # timeinv_op in the new basis: reptrans T reptrans^T applied to conj.
-        tmat = _tmat(l)
-        tinv = transmat @ tmat @ transmat.T
+        tinv = transmat @ tmat(l) @ transmat.T
         rotrep = tinv @ np.conj(rotrep)
     return rotrep, timeinv, phase
 
 
 # --- rotloc rotrep (set_rotloc.f) under SP+SO, non-mixing --------------------
-
-def _euler(Rot):
-    """Euler angles (a, b, g) of a 3x3 proper rotation, dmftproj convention
-    (set_rotloc.f euler, called on TRANSPOSE(krotm))."""
-    def dot(u, v):
-        return float(np.dot(u, v))
-
-    def vecprod(u, v):
-        return np.cross(u, v)
-    R = Rot
-    y = np.array([0.0, 1.0, 0.0])
-    z = np.array([0.0, 0.0, 1.0])
-    yyy = R[:, 1]
-    zz = R[:, 2]
-    yy = vecprod(z, zz)
-    y_norm = math.sqrt(dot(yy, yy))
-    pi = math.pi
-    if y_norm < 1e-10:
-        d = dot(y, yyy)
-        a = math.acos(d / abs(d)) if abs(d) > 1.0 else math.acos(d)
-        if dot(z, zz) > 0.0:
-            c = 0.0
-            b = 0.0
-            if yyy[0] > 0.0:
-                a = 2 * pi - a
-        else:
-            c = a
-            a = 0.0
-            b = pi
-            if yyy[0] < 0.0:
-                c = 2 * pi - c
-    else:
-        yy = yy / y_norm
-        aa, bb, cc = dot(y, yy), dot(z, zz), dot(yy, yyy)
-        if abs(aa) > 1.0:
-            aa = aa / abs(aa)
-        if abs(bb) > 1.0:
-            bb = bb / abs(bb)
-        if abs(cc) > 1.0:
-            cc = cc / abs(cc)
-        b = math.acos(bb)
-        a = math.acos(aa)
-        c = math.acos(cc)
-        if yy[0] > 0.0:
-            a = 2 * pi - a
-        pom = vecprod(yy, yyy)
-        if dot(pom, zz) < 0.0:
-            c = 2 * pi - c
-    return a, b, c
-
 
 def _rotloc_rotrep_so(orb, ops, info, ref, transmat):
     """rotloc(iatom)%rotrep(l)%mat, the full 2*(2l+1) Rloc spinor rotation in
@@ -477,7 +147,7 @@ def _rotloc_rotrep_so(orb, ops, info, ref, transmat):
     d = 2 * l + 1
 
     # rotloc%rotl(2d) initial value (setsym.f:496-528): spmt (x) D(rotloc_ref).
-    Dref = _dmat(l, ref['a'], ref['b'], ref['g'], float(ref['iprop']))
+    Dref = dmat(l, ref['a'], ref['b'], ref['g'], float(ref['iprop']))
     f = (ref['a'] + ref['g']) / 2.0
     spmt = np.zeros((2, 2), dtype=complex)
     spmt[0, 0] = np.exp(1j * f) * math.cos(ref['b'] / 2.0)
@@ -501,9 +171,9 @@ def _rotloc_rotrep_so(orb, ops, info, ref, transmat):
     srot_phase = (op['g'] - op['a']) if timeinv else (op['a'] + op['g'])
     # srot%rotl D(R[isym])_{lm}, with the timeinv operator applied if magnetic
     # (setsym.f:318-331 applies timeinv_op to srot%rotl before set_rotloc).
-    rotl_sym = _dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+    rotl_sym = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
     if timeinv:
-        rotl_sym = _tmat(l) @ np.conj(rotl_sym)
+        rotl_sym = tmat(l) @ np.conj(rotl_sym)
     ephase = np.exp(1j * srot_phase / 2.0)
     tmp = np.zeros((2 * d, 2 * d), dtype=complex)
     tmp[:d, :d] = ephase * rotl_sym
@@ -665,19 +335,11 @@ def _rotdens_densmat(orb, blocks, rotrep_loc, timeinv):
 
 # --- parproj writer ----------------------------------------------------------
 
-def _fmt(x):
-    return '  %.16E' % float(x)
-
-
-def _w(f, arr):
-    f.write(''.join(_fmt(x) for x in arr) + '\n')
-
-
 def write_parproj(case):
     """Read <case>.almblm{up,dn}, <case>.indmftpr, <case>.struct,
     <case>.dmftsym and write <case>.parproj in the dmftproj format."""
-    info = _read_indmftpr(case + '.indmftpr')
-    nsym, ops, rotloc_ref = _read_dmftsym(case + '.dmftsym')
+    info = read_indmftpr(case + '.indmftpr')
+    nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
 
     up, dn = case + '.almblmup', case + '.almblmdn'
     if os.path.exists(up) and os.path.exists(dn):
@@ -688,7 +350,7 @@ def write_parproj(case):
     ifSO = bool(info['so'])
     ns = 2 if ifSP else 1
 
-    spins = [_read_almblm(p, info) for p in spin_files]
+    spins = [read_almblm(p, info, projectors=True) for p in spin_files]
     nk = spins[0]['nk']
     info['nk'] = nk
 
@@ -713,12 +375,12 @@ def write_parproj(case):
     below_windows = []
     for ik in range(nk):
         kp = spins[0]['kp'][ik]
-        windows.append(_select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
+        windows.append(select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
                                       info['e_bot'], info['e_top']))
-        below_windows.append(_select_window(kp['nbmin'], kp['nbmax'],
+        below_windows.append(select_window(kp['nbmin'], kp['nbmax'],
                                             kp['eband'], -1e6, info['e_bot']))
 
-    transmats = {(o['l'], o['sort']): _reptrans(o['basis'], o['l'])
+    transmats = {(o['l'], o['sort']): reptrans(o['basis'], o['l'])
                  for o in orbs}
 
     # rot_projectmat local rotation: the op mapping the representative atom of
@@ -737,7 +399,7 @@ def write_parproj(case):
         l = o['l']
         transmat = transmats[(l, o['sort'])]
         op = rotloc_op[o['atom']]
-        rot = _dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+        rot = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
         matn_reps[o['atom']] = _build_matn_rep(
             o, info, spins, ns, windows, transmat, rot)
         matn_reps_full[o['atom']] = _build_matn_rep(
@@ -794,24 +456,24 @@ def write_parproj(case):
                     for ispin in range(ns):
                         P = matn_reps[atom][(ik, ispin)][:, :, ir]
                         for mi in range(2 * l + 1):
-                            _w(f, P[mi, :].real)
+                            write_row(f, P[mi, :].real)
                     for ispin in range(ns):
                         P = matn_reps[atom][(ik, ispin)][:, :, ir]
                         for mi in range(2 * l + 1):
-                            _w(f, P[mi, :].imag)
+                            write_row(f, P[mi, :].imag)
 
             # (B) density matrix, non-mixing SP+SO 2*(2l+1) (outputqmc.f:1033-1049).
             dp = densprint[atom]
             for m in range(2 * (2 * l + 1)):
-                _w(f, dp[m, :].real)
+                write_row(f, dp[m, :].real)
             for m in range(2 * (2 * l + 1)):
-                _w(f, dp[m, :].imag)
+                write_row(f, dp[m, :].imag)
 
             # (C) Rloc rotrep, non-mixing SP+SO (outputqmc.f:1148-1158).
             rotrep_loc, timeinv = rotloc_rotrep[atom]
             for m in range(2 * (2 * l + 1)):
-                _w(f, rotrep_loc[m, :].real)
+                write_row(f, rotrep_loc[m, :].real)
             for m in range(2 * (2 * l + 1)):
-                _w(f, rotrep_loc[m, :].imag)
+                write_row(f, rotrep_loc[m, :].imag)
             if ifSP:
                 f.write('%6d\n' % (1 if timeinv else 0))
