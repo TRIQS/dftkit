@@ -29,12 +29,10 @@ basis transforms (transmat), the case.indmftpr / case.dmftsym parsers, the
 proj_mode==0 band-window selection and the gfortran-style real formatters.
 This module owns each of those exactly once.
 
-A deliberate split survives in the angular basis: symqmc builds its symmetry
-matrices from the EXACT cubic harmonics, while ctqmcout/sympar/parproj feed
-projector/representation numbers through the single-precision CMPLX cast that
-dmftproj applies in set_ang_trans.f:146 (0.70710676908 for 1/sqrt2, the
-dft_tools #148 noise). `reptrans` exposes both via the `cast` flag; nothing
-here "fixes" that truncation.
+All generators use the exact double-precision cubic harmonics. dmftproj reads
+the same coefficients from full-precision SRC_templates (the precision-fix PR),
+so the port reproduces its output to machine precision. `reptrans` keeps a
+`cast` flag only to reproduce the legacy single-precision template on demand.
 """
 
 import math
@@ -99,11 +97,9 @@ def read_two_complex(r):
 
 
 # --- angular bases: transmat = <new_i|m>, m = -l..l --------------------------
-# Standard cubic harmonics, Wien2k convention. dmftproj stores cubic/fromfile
-# coefficients via a single-precision CMPLX cast (set_ang_trans.f:146); the
-# projector/representation generators reproduce that float32 truncation
-# (0.70710676908 for 1/sqrt2), while the symqmc symmetry matrices use the
-# exact harmonics. `reptrans(..., cast=...)` selects between the two.
+# Standard cubic harmonics, Wien2k convention, exact double precision. dmftproj
+# reads the same coefficients from full-precision SRC_templates (the precision-
+# fix PR); `reptrans(..., cast=True)` reproduces the legacy float32 template.
 
 _COMPLEX = {l: np.eye(2 * l + 1, dtype=complex) for l in range(4)}
 
@@ -198,6 +194,79 @@ def tmat(l):
 
 def timeinv_orbital(l, mat):
     return tmat(l) @ np.conj(mat)
+
+
+def mixing_timeinv_op(l, P):
+    """The spinor time-reversal operator -i sigma_y (x) T in the mixing basis:
+    tinv_{new} = P tinv_{lm} P^T (timeinv.f, ifmixing branch). Returned as the
+    bare operator; callers apply it as tinv @ conj(mat)."""
+    d = 2 * l + 1
+    tm = tmat(l)
+    tinv = np.zeros((2 * d, 2 * d), dtype=complex)
+    tinv[:d, d:] = -tm
+    tinv[d:, :d] = tm
+    return P @ tinv @ P.T
+
+
+def rotloc_rotl_so(l, ref, ops, iatom, iref):
+    """The composed 2(2l+1) Rloc rotation rotloc(iatom)%rotl(l) under SP+SO
+    (setsym.f:496-528 + set_rotloc.f): the representative spinor rotloc
+    spmt (x) D(rotloc_ref) composed with the first symmetry op R[isym] mapping
+    iref onto iatom, with the orbital time-reversal applied for the magnetic op.
+    Returns (rotl, timeinv); callers apply their own basis transform (the full
+    transmat for a mixing basis, blkdiag(transmat, transmat) otherwise)."""
+    d = 2 * l + 1
+    Dref = dmat(l, ref['a'], ref['b'], ref['g'], float(ref['iprop']))
+    f = (ref['a'] + ref['g']) / 2.0
+    spmt = np.zeros((2, 2), dtype=complex)
+    spmt[0, 0] = np.exp(1j * f) * math.cos(ref['b'] / 2.0)
+    spmt[1, 1] = np.conj(spmt[0, 0])
+    f = -(ref['a'] - ref['g']) / 2.0
+    spmt[0, 1] = np.exp(1j * f) * math.sin(ref['b'] / 2.0)
+    spmt[1, 0] = -np.conj(spmt[0, 1])
+    rotl = np.zeros((2 * d, 2 * d), dtype=complex)
+    rotl[:d, :d] = spmt[0, 0] * Dref
+    rotl[d:, d:] = spmt[1, 1] * Dref
+    rotl[:d, d:] = spmt[0, 1] * Dref
+    rotl[d:, :d] = spmt[1, 0] * Dref
+
+    op = next(o for o in ops if o['perm'][iref - 1] == iatom)
+    det2 = (op['krotm'][0, 0] * op['krotm'][1, 1]
+            - op['krotm'][0, 1] * op['krotm'][1, 0])
+    timeinv = det2 < 0.0
+    srot_phase = (op['g'] - op['a']) if timeinv else (op['a'] + op['g'])
+    rotl_sym = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+    if timeinv:
+        rotl_sym = tmat(l) @ np.conj(rotl_sym)
+    ephase = np.exp(1j * srot_phase / 2.0)
+    tmp = np.zeros((2 * d, 2 * d), dtype=complex)
+    tmp[:d, :d] = ephase * rotl_sym
+    tmp[d:, d:] = np.conj(ephase) * rotl_sym
+    rotl = (tmp @ np.conj(rotl)) if timeinv else (tmp @ rotl)
+    return rotl, timeinv
+
+
+def mixing_rotrep(op, l, P, ti):
+    """The full 2(2l+1) spinor representation D(R)_{new_i} = P spinrot P^dag of
+    one symmetry operation in a spin-coupling (mixing) basis, with the spinor
+    time-reversal operator applied for the magnetic (timeinv) operations
+    (setsym.f spinrotmat + timeinv_op). This is srot%rotrep(l,isrt)%mat, shared
+    by the symqmc and sympar shell matrices."""
+    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
+    phase = (op['c'] - op['a']) if ti else (op['a'] + op['c'])
+    e = np.exp(1j * phase / 2)
+    d = 2 * l + 1
+    spinrot = np.zeros((2 * d, 2 * d), dtype=complex)
+    if ti:                                      # beta = pi, block-antidiagonal
+        spinrot[:d, d:] = e * rotl
+        spinrot[d:, :d] = -np.conj(e) * rotl
+    else:                                       # beta = 0, block-diagonal
+        spinrot[:d, :d] = e * rotl
+        spinrot[d:, d:] = np.conj(e) * rotl
+    rotrep = P @ spinrot @ np.conj(P.T)
+    if ti:
+        rotrep = mixing_timeinv_op(l, P) @ np.conj(rotrep)
+    return rotrep
 
 
 # --- case.indmftpr -----------------------------------------------------------
@@ -403,6 +472,44 @@ def select_window(nbmin, nbmax, eband, e1, e2):
     if not included:
         nb_bot = nb_top = 0
     return included, nb_bot, nb_top
+
+
+def select_band_window(nbmin, nbmax, b_bot, b_top):
+    """proj_mode 1/2 band-index selection for one k-point (set_projections.f
+    70-88). e1/e2 are band indices, not energies: every k-point is included,
+    nb_bot = b_bot clamped up to nbmin (strict INT(e1) > nbmin), nb_top = b_top
+    clamped down to nbmax. Returns (included=True, nb_bot, nb_top)."""
+    nb_bot = b_bot if b_bot > nbmin else nbmin
+    nb_top = b_top if b_top < nbmax else nbmax
+    return True, nb_bot, nb_top
+
+
+def band_index_window(info, spins):
+    """Resolve the (b_bot, b_top) band-index window for proj_mode 1 and 2.
+
+    proj_mode 2 (dmftproj.f:233-237): b_bot=INT(e_bot), b_top=INT(e_top) taken
+    directly from the indmftpr window line.
+
+    proj_mode 1 (dmftproj.f:704-722): e_bot/e_top are Fermi-shifted energies;
+    scan every spin and k-point for bands with e_bot < E <= e_top and take the
+    global min/max band index, seeded with b_bot=1000, b_top=1 so an empty scan
+    keeps that seed. `spins` is the list of read_almblm dicts (one per spin)."""
+    if info['proj_mode'] == 2:
+        return int(info['e_bot']), int(info['e_top'])
+    if info['proj_mode'] != 1:
+        raise ValueError('band_index_window is only valid for proj_mode 1 or 2')
+    e_bot, e_top = info['e_bot'], info['e_top']
+    b_bot, b_top = 1000, 1
+    for sp in spins:
+        for kp in sp['kp']:
+            for off, ib in enumerate(range(kp['nbmin'], kp['nbmax'] + 1)):
+                e = kp['eband'][off]
+                if e > e_bot and e <= e_top:
+                    if ib > b_top:
+                        b_top = ib
+                    if ib < b_bot:
+                        b_bot = ib
+    return b_bot, b_top
 
 
 # --- gfortran-style real formatters ------------------------------------------

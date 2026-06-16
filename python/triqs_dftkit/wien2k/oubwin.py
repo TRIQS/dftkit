@@ -31,10 +31,16 @@ result in the case.oubwin format read by the charge self-consistency.
 It reproduces the Fortran path: read elecn/nk/nloat/eferm from the almblm
 header (outbwin.f / dmftproj.f), parse the energy window (e_bot, e_top,
 proj_mode) from the last line of case.indmftpr, shift every band eigenvalue
-by eferm, and apply the proj_mode==0 selection of set_projections.f
-(strict lower bound e_bot < E, inclusive upper bound E <= e_top, yielding a
-single contiguous [nb_bot, nb_top] per k). The weight written per included
-k-point is the tetrahedron weight of the lowest band nbmin.
+by eferm, and apply the set_projections.f selection. For proj_mode==0 this is
+the energy-window rule (strict lower bound e_bot < E, inclusive upper bound
+E <= e_top, yielding a single contiguous [nb_bot, nb_top] per k). For
+proj_mode 1 and 2 the window is a pair of band indices (b_bot, b_top): every
+k-point is included with nb_bot/nb_top those indices clamped to the local
+nbmin/nbmax (set_projections.f:70-88). In mode 2 the indices come straight
+from the window line; in mode 1 they are the global min/max band index over
+all spins/k whose Fermi-shifted energy lies in (e_bot, e_top]
+(dmftproj.f:704-722). The weight written per included k-point is the
+tetrahedron weight of the lowest band nbmin.
 
 Spin-polarization is detected from the input files: case.almblmup /
 case.almblmdn present => two spin files (case.oubwinup / case.oubwindn),
@@ -45,21 +51,23 @@ aborts otherwise, a check this generator also performs.
 
 import os
 
-from ._dmftproj import read_almblm, read_indmftpr, select_window
+from ._dmftproj import (band_index_window, read_almblm, read_indmftpr,
+                        select_band_window, select_window)
 
 
-def _windows_for_spin(almblm, info):
-    """Per-k (included, nb_bot, nb_top, weight) for one spin's almblm file."""
-    if info['proj_mode'] != 0:
-        raise NotImplementedError(
-            'oubwin generation is implemented for the energy-window '
-            'projection mode (proj_mode==0); band-index modes 1 and 2 are '
-            'not yet covered by a test fixture')
-    sp = read_almblm(almblm, info)
+def _windows_from_spin(sp, info, band_window):
+    """Per-k (included, nb_bot, nb_top, weight) for one already-read spin dict.
+    proj_mode==0 uses the energy window; modes 1/2 use the band-index window
+    (b_bot, b_top) precomputed in band_window."""
     out = []
     for kp in sp['kp']:
-        incl, nb_bot, nb_top = select_window(
-            kp['nbmin'], kp['nbmax'], kp['eband'], info['e_bot'], info['e_top'])
+        if info['proj_mode'] == 0:
+            incl, nb_bot, nb_top = select_window(
+                kp['nbmin'], kp['nbmax'], kp['eband'],
+                info['e_bot'], info['e_top'])
+        else:
+            incl, nb_bot, nb_top = select_band_window(
+                kp['nbmin'], kp['nbmax'], band_window[0], band_window[1])
         out.append((incl, nb_bot, nb_top, kp['weight']))
     return out
 
@@ -92,8 +100,13 @@ def write_oubwin(case):
     spin_polarized = os.path.exists(up) and os.path.exists(dn)
 
     if spin_polarized:
-        win_up = _windows_for_spin(up, info)
-        win_dn = _windows_for_spin(dn, info)
+        sp_up = read_almblm(up, info)
+        sp_dn = read_almblm(dn, info)
+        # mode 1 scans both spins for the global band-index window.
+        bw = (band_index_window(info, [sp_up, sp_dn])
+              if info['proj_mode'] != 0 else None)
+        win_up = _windows_from_spin(sp_up, info, bw)
+        win_dn = _windows_from_spin(sp_dn, info, bw)
         if ifso:
             for u, d in zip(win_up, win_dn):
                 if u[0] != d[0] or u[1] != d[1] or u[2] != d[2]:
@@ -103,5 +116,8 @@ def write_oubwin(case):
         _write_oubwin_file(case + '.oubwinup', ifso, win_up)
         _write_oubwin_file(case + '.oubwindn', ifso, win_dn)
     else:
-        win = _windows_for_spin(case + '.almblm', info)
+        sp = read_almblm(case + '.almblm', info)
+        bw = (band_index_window(info, [sp])
+              if info['proj_mode'] != 0 else None)
+        win = _windows_from_spin(sp, info, bw)
         _write_oubwin_file(case + '.oubwin', ifso, win)

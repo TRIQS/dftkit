@@ -49,8 +49,8 @@ is full double precision.
 
 import numpy as np
 
-from ._dmftproj import (dmat, read_dmftsym, read_fromfile, read_indmftpr,
-                        reptrans, tmat, timeinv_orbital)
+from ._dmftproj import (dmat, mixing_rotrep, read_dmftsym, read_fromfile,
+                        read_indmftpr, reptrans, timeinv_orbital)
 
 
 # --- correlated shells -------------------------------------------------------
@@ -145,29 +145,9 @@ def _nonmixing_matrix(op, shell, ti):
 
 
 def _mixing_matrix(op, shell, ti):
-    """Spin-coupling basis: full 2(2l+1) spinor representation. The orbital
-    rotation enters block-diagonal (beta=0) or block-antidiagonal (beta=pi, the
-    magnetic operations); the spinor time-reversal -i sigma_y (x) T is then
-    applied to the magnetic operations (setsym.f, timeinv.f)."""
-    l, P = shell['l'], shell['P']
-    rotl = dmat(l, op['a'], op['b'], op['c'], np.linalg.det(op['krotm']))
-    e = np.exp(1j * _phase(op, ti) / 2)
-    d = 2 * l + 1
-    spinrot = np.zeros((2 * d, 2 * d), dtype=complex)
-    if ti:                                      # beta = pi, block-antidiagonal
-        spinrot[:d, d:] = e * rotl
-        spinrot[d:, :d] = -np.conj(e) * rotl
-    else:                                       # beta = 0, block-diagonal
-        spinrot[:d, :d] = e * rotl
-        spinrot[d:, d:] = np.conj(e) * rotl
-    rotrep = P @ spinrot @ np.conj(P.T)
-    if ti:
-        tm = tmat(l)
-        tinv = np.zeros((2 * d, 2 * d), dtype=complex)
-        tinv[:d, d:] = -tm
-        tinv[d:, :d] = tm
-        rotrep = (P @ tinv @ P.T) @ np.conj(rotrep)
-    return rotrep
+    """Spin-coupling basis: full 2(2l+1) spinor representation (setsym.f,
+    timeinv.f), shared with sympar via _dmftproj.mixing_rotrep."""
+    return mixing_rotrep(op, shell['l'], shell['P'], bool(ti))
 
 
 def _format_matrix(mat):

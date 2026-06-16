@@ -47,6 +47,9 @@ def _check(case):
     try:
         shutil.copy(os.path.join(HERE, f'{case}.indmftpr'),
                     os.path.join(tmp, f'{case}.indmftpr'))
+        if os.path.exists(os.path.join(HERE, 'jbasis_d.dat')):
+            shutil.copy(os.path.join(HERE, 'jbasis_d.dat'),
+                        os.path.join(tmp, 'jbasis_d.dat'))
         for ext in ('struct', 'dmftsym'):
             shutil.copy(os.path.join(HERE, f'CaOs2.{ext}'),
                         os.path.join(tmp, f'{case}.{ext}'))
@@ -61,5 +64,7 @@ def _check(case):
 
 
 _check('CaOs2_partial')
+# Spin-mixing fromfile (|j, m_j>) included shell: the full 2(2l+1) srot%rotrep.
+_check('CaOs2_jbasis_full')
 
 print('wien2k_sympar_python: ok')

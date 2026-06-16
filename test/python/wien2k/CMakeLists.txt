@@ -47,17 +47,32 @@ set_property(TEST Py_wien2k_symqmc_mixing APPEND PROPERTY ENVIRONMENT
 
 # Pure-Python case.oubwin band-window generator vs the dmftproj Fortran output.
 # Reuses the committed CaOs2.oubwin{up,dn} references and the gzipped CaOs2
-# almblm inputs (shared with the ctqmcout test).
-file(COPY CaOs2.almblmup.gz CaOs2.almblmdn.gz DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+# almblm inputs (shared with the ctqmcout test). CaOs2_mode1 adds the band-index
+# projection path (proj_mode 1, window 60..76) against its own dmftproj refs.
+file(COPY CaOs2.almblmup.gz CaOs2.almblmdn.gz
+          CaOs2_mode1.indmftpr CaOs2_mode1.oubwinup CaOs2_mode1.oubwindn
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME Py_wien2k_oubwin_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_oubwin_python.py
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_oubwin_python APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
+# Wide-window fromfile (|j, m_j>) inputs and references shared by the ctqmcout,
+# sympar and parproj generator tests (the spin-mixing dft_tools #148 path).
+file(COPY CaOs2_jbasis_full.indmftpr CaOs2_jbasis_full.ctqmcout.gz
+          CaOs2_jbasis_full.sympar.gz CaOs2_jbasis_full.parproj.gz
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+
 # Pure-Python case.ctqmcout correlated-shell projector generator vs the dmftproj
 # Fortran output. Reuses CaOs2.ctqmcout / indmftpr / struct / dmftsym and the
-# gzipped almblm; floats compared at 1e-6 (dmftproj single-precision floor).
+# gzipped almblm; floats compared at 1e-11 (full-rank wide window). The
+# CaOs2_mode{1,2}_full fixtures exercise the band-index projection modes
+# (proj_mode 1 scan, proj_mode 2 explicit indices), both resolving to bands
+# 43..92, against their own precision-fixed dmftproj references.
+file(COPY CaOs2_mode1_full.indmftpr CaOs2_mode1_full.ctqmcout.gz
+          CaOs2_mode2_full.indmftpr CaOs2_mode2_full.ctqmcout.gz
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME Py_wien2k_ctqmcout_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_ctqmcout_python.py
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

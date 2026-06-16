@@ -73,6 +73,25 @@ incl, lo, hi = dp.select_window(10, 14, eband, -0.15, 0.30)
 assert incl and lo == 11 and hi == 13
 
 
+# --- band-index window (proj_mode 1/2) ---------------------------------------
+
+# set_projections.f:70-88: every k included, indices clamped to nbmin/nbmax.
+incl, lo, hi = dp.select_band_window(1, 92, 60, 76)
+assert incl and lo == 60 and hi == 76
+incl, lo, hi = dp.select_band_window(50, 80, 43, 92)     # clamp both ends
+assert incl and lo == 50 and hi == 80
+
+# proj_mode 2 takes b_bot/b_top straight from the (rounded) window line.
+m2 = {'proj_mode': 2, 'e_bot': 43.0, 'e_top': 92.0}
+assert dp.band_index_window(m2, []) == (43, 92)
+
+# proj_mode 1 scans the (e_bot, e_top] energies for the global band-index range.
+m1 = {'proj_mode': 1, 'e_bot': -0.15, 'e_top': 0.30}
+spins = [{'kp': [{'nbmin': 1, 'nbmax': 5,
+                  'eband': np.array([-1.0, -0.1, 0.05, 0.2, 0.5])}]}]
+assert dp.band_index_window(m1, spins) == (2, 4)
+
+
 # --- case.indmftpr / case.dmftsym structured parse ---------------------------
 
 info = dp.read_indmftpr(os.path.join(HERE, 'CaOs2.indmftpr'))

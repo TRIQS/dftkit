@@ -14,6 +14,18 @@
 # then amplifies the last-ULP libm difference between gfortran and numpy, which is
 # a numerical property of that degenerate case, not of the port.) Reference built
 # with the precision-fixed dmftproj (PR #14) and full-precision templates.
+#
+# CaOs2_jbasis_full exercises the spin-mixing fromfile (|j, m_j>) path: the Os d
+# shell is a 2(2l+1)=10 spinor basis (jbasis_d.dat), so the projector, Rloc
+# rotrep and complex-harmonics transform blocks are the full mixing matrices the
+# dft_tools #148 path singles out. Same wide window for the full-rank Loewdin.
+#
+# CaOs2_mode1_full and CaOs2_mode2_full exercise the band-index projection modes
+# (set_projections.f:70-88). Mode 1 ("-2.0 3.0 1") scans all spins/k for the
+# global band-index window; mode 2 ("43 92 2") takes the indices straight from
+# the window line. Both resolve to bands 43..92 (50 bands > 20 correlated
+# spin-orbitals), so the Loewdin overlap stays full rank and the projectors
+# match the precision-fixed dmftproj to machine precision.
 
 import gzip
 import os
@@ -49,6 +61,9 @@ def _check(case):
     try:
         shutil.copy(os.path.join(HERE, f'{case}.indmftpr'),
                     os.path.join(tmp, f'{case}.indmftpr'))
+        if os.path.exists(os.path.join(HERE, 'jbasis_d.dat')):
+            shutil.copy(os.path.join(HERE, 'jbasis_d.dat'),
+                        os.path.join(tmp, 'jbasis_d.dat'))
         for ext in ('struct', 'dmftsym'):
             shutil.copy(os.path.join(HERE, f'CaOs2.{ext}'),
                         os.path.join(tmp, f'{case}.{ext}'))
@@ -63,5 +78,8 @@ def _check(case):
 
 
 _check('CaOs2_full')
+_check('CaOs2_jbasis_full')
+_check('CaOs2_mode1_full')            # proj_mode 1: band-index window 43..92
+_check('CaOs2_mode2_full')            # proj_mode 2: explicit band indices 43 92
 
 print('wien2k_ctqmcout_python: ok')

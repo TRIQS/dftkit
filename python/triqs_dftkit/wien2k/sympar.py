@@ -50,25 +50,31 @@ path and writes the timeflag line; the paramagnetic tail is absent.
 import os
 import numpy as np
 
-from ._dmftproj import (dmat, fmt, read_dmftsym, read_indmftpr, reptrans,
-                        timeinv_orbital, tmat, write_row)
+from ._dmftproj import (dmat, fmt, mixing_rotrep, read_dmftsym, read_fromfile,
+                        read_indmftpr, reptrans, timeinv_orbital, tmat,
+                        write_row)
 
 
 # --- included shells ---------------------------------------------------------
 
 def _included_shells(info):
     """One entry per INCLUDED shell (l_inc in {1,2}), one per atom of its sort,
-    in orb order (sort, l, atom). Each shell carries l, basis name and the
-    transform P (the single-precision-cast cubic harmonics dmftproj writes)."""
+    in orb order (sort, l, atom). Each shell carries l, basis name, a mixing
+    flag and the transform P: a spin-coupling fromfile basis gives the full
+    2(2l+1) P (P spinrot P^dag matrix), otherwise the (2l+1) up/up block (the
+    single-precision-cast cubic harmonics dmftproj writes)."""
     shells = []
     for isort in range(info['nsort']):
         s = info['sorts'][isort]
         for l in s['included_ls']:
-            P = reptrans(s['basis'], l)
+            if s['basis'] == 'fromfile':
+                P, mixing = read_fromfile(s['sourcefile'], l)
+            else:
+                P, mixing = reptrans(s['basis'], l), False
             for imu in range(1, info['mult'][isort] + 1):
                 atom = sum(info['mult'][:isort]) + imu
                 shells.append(dict(l=l, sort=isort + 1, atom=atom,
-                                   basis=s['basis'], P=P))
+                                   basis=s['basis'], P=P, mixing=mixing))
     return shells
 
 
@@ -105,6 +111,8 @@ def _shell_matrix(op, shell, ti):
     l = shell['l']
     if l == 0:
         return _l0_matrix(op, ti)
+    if shell['mixing']:
+        return mixing_rotrep(op, l, shell['P'], bool(ti))
     return _nonmixing_matrix(op, shell, ti)
 
 
@@ -126,10 +134,6 @@ def write_sympar(case):
     time-reversal tail is written only when .not.ifSP."""
     info = read_indmftpr(case + '.indmftpr')
     shells, so = _included_shells(info), info['so']
-    if any(sh['basis'] == 'fromfile' for sh in shells):
-        raise NotImplementedError(
-            'sympar for fromfile/mixing bases is not yet covered by a test '
-            'fixture; cubic and complex bases are supported')
     nsym, ops = read_dmftsym(case + '.dmftsym')
     natom = len(ops[0]['perm'])
 
