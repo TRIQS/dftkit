@@ -6,7 +6,7 @@ doc/cpp2rst_generated
 # VASP pseudopotentials are copyrighted and must not be committed (anywhere)
 POTCAR
 
-# VASP run outputs
+# VASP run outputs (inputs INCAR, KPOINTS, POSCAR, plo.cfg stay tracked)
 CHG
 CHGCAR
 CONTCAR
@@ -36,3 +36,7 @@ wannier90.win
 test/python/vasp/converter/*.ctrl
 test/python/vasp/converter/*.pg[0-9]
 test/python/vasp/converter/*.test.h5
+# DMFT driver run artifacts
+checkpoint.h5
+log
+err
