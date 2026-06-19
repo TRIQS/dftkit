@@ -86,12 +86,7 @@ try:
                                  perform_tail_fit=True,
                                  fit_min_w=10, fit_max_w=14,
                                  )
-            # CT-SEG needs a real h_loc0: op_from_block_matrix flags coefficients complex
-            # whenever the input matrices are complex dtype (work_data.cpp extracts mu via a
-            # real_or_complex->double cast that throws on complex-flagged values). The impurity
-            # levels are Hermitian/real, so drop the ~1e-18 numerical imaginary noise here.
-            Eimp_real = [h.real.copy() for h in Eimp]
-            solver_results = solve_generic(Delta, Eimp_real, h_int, **solver_params)
+            solver_results = solve_generic(Delta, Eimp, h_int, **solver_params)
 
             Sigma_imp_dynamic, Sigma_imp_static = solver_results.Sigma_dynamic, solver_results.Sigma_HartreeFock
 
