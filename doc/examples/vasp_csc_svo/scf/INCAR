@@ -10,7 +10,7 @@ KSPACING = 0.2
 
 # converge wave functions
 EDIFF = 1.E-10
-NELMIN = 35
+NELMIN = 20
 NBANDS = 32
 
 
