@@ -1,3 +1,24 @@
+# ============================================================================
+# Charge self-consistent (CSC) DFT+DMFT for SrVO3 with VASP + TRIQS/modest
+# ============================================================================
+#
+# This script drives a full CSC DFT+DMFT calculation. The structure is two
+# nested loops:
+#
+#   * outer loop (n_total_loops): one DFT charge update per iteration. VASP is
+#     kept alive as a persistent background process by the dftkit VASP driver;
+#     each outer iteration feeds the DMFT charge-density correction back into
+#     VASP and reads the updated Kohn-Sham Hamiltonian / projectors.
+#   * inner loop (n_dmft_loops): the DMFT self-consistency cycle (build the
+#     hybridization, solve the impurity with CT-SEG, update the self-energy)
+#     for the current DFT Hamiltonian.
+#
+# The run always ends on a DMFT step: after the last outer iteration the DFT
+# code is not invoked again (see the guard around the charge update below).
+#
+# Required inputs in this directory: INCAR, POSCAR, POTCAR, KPOINTS and the
+# PLOVasp projector definition plo.cfg.
+
 import numpy as np
 
 import triqs.utility.mpi as mpi
@@ -14,30 +35,41 @@ from triqs_modest.dft_driver import DftDriver
 from h5 import HDFArchive
 
 
+# --- Physical and run parameters ---------------------------------------------
 seedname = "vasp"
-beta = 10.0
-U    = 4.50
-J    = 0.65
-Up   = U -2*J
-n_iw = 1000
-n_total_loops = 10
-n_dmft_loops  =  1
+beta = 10.0          # inverse temperature (1/eV)
+U    = 4.50          # Kanamori intra-orbital interaction (eV)
+J    = 0.65          # Hund's coupling (eV)
+Up   = U -2*J        # inter-orbital interaction (rotationally invariant choice)
+n_iw = 1000          # number of Matsubara frequencies
+n_total_loops = 6    # outer CSC (DFT charge) iterations
+n_dmft_loops  =  1   # inner DMFT iterations per outer loop
 
+# --- DFT driver --------------------------------------------------------------
+# Wrap the dftkit VASP driver in the modest DftDriver. The VASP driver launches
+# vasp_command under MPI and converts the output via PLOVasp (plo.cfg).
 driver = DftDriver(VaspDriver(seedname=seedname, plo_cfg="plo.cfg",
-                               mpi_handler=MPIHandler(mpi_exec="mpirun -np 8"),
-                               vasp_command="vasp_std"))
+                               mpi_handler=MPIHandler(mpi_exec="mpirun -np 16"),
+                               vasp_command="/fsc/home/hampel/git/vasp/master-cmake/build_gnu/bin/vasp_std"))
 
+# Run the initial DFT, convert the output, and return the target electron count
+# together with the one-body elements (Kohn-Sham Hamiltonian + projectors).
 target_density, obe = driver.one_body_elements_from_dft()
 mpi.report(obe)
 
+# Build the embedding (correlated subspace) from the projector space.
 E = M.make_embedding(obe.C_space); mpi.report(E.description(True))
 
+# Local Kanamori interaction Hamiltonian on the impurity.
 h_int = M.make_kanamori(E.sigma_names, E.imp_decomposition(0), U, Up, J, False, False)
 
+# Double-counting correction (Held's fully-localized-limit flavour).
 DcTerm = M.DcSolver("NonPolarized", "cHeld", U, J)
 
 mesh = MeshImFreq(beta=beta, S = "Fermion", n_iw=n_iw)
 
+# DFT-only chemical potential and local Green's function, used to detect the
+# degenerate block structure that the impurity quantities are symmetrized over.
 mu_dft = M.find_chemical_potential(target_density, obe, beta, verbosity=False)
 Gdft = E.extract(M.local_gf.gloc(mesh, obe, mu_dft))[0]
 mpi.report(f"Gdft density= {Gdft.total_density().real}")
@@ -45,6 +77,7 @@ mpi.report(f"Gdft density= {Gdft.total_density().real}")
 deg_blocks = M.analyze_degenerate_blocks(Gdft)
 mpi.report(f"deg_blocks= {deg_blocks}")
 
+# Initialise the self-energy: zero dynamic part plus the static double counting.
 Sigma_imp_dc = DcTerm.dc_self_energy(Gdft)
 
 Sigma_imp_dynamic, Sigma_imp_static = E.make_zero_imp_self_energies(mesh)[0]
@@ -60,7 +93,7 @@ try:
 
         # for first iteration converge Sigma imp first
         if n_iter == 0:
-            n_dmft_loops_loc = 5
+            n_dmft_loops_loc = 4
         else:
             n_dmft_loops_loc = n_dmft_loops
         # Begin DMFT loop
@@ -129,10 +162,14 @@ try:
                 ar[path]["Sigma_iw_static"] = solver_results.Sigma_HartreeFock
                 ar[path]["Sigma_dc"]        = Sigma_imp_dc
 
-        # Update the one-body Hamiltonian with the charge density correction
-        mpi.report(f"Calling VASP charge update / DFT driver "
-                   f"(global iter {n_iter+1}/{n_total_loops})...")
-        obe = driver.update_one_body_elements_with_charge_correction(N_k, Eint_m_dc)[1]
+        # Update the one-body Hamiltonian with the charge density correction.
+        # Skip on the last outer iteration: the calculation must end on a DMFT
+        # step, so there is no point triggering another VASP charge update whose
+        # result would never be used.
+        if n_iter < n_total_loops - 1:
+            mpi.report(f"Calling VASP charge update / DFT driver "
+                       f"(global iter {n_iter+1}/{n_total_loops})...")
+            obe = driver.update_one_body_elements_with_charge_correction(N_k, Eint_m_dc)[1]
 
 finally:
     # Ensure VASP is killed even if the script crashes
