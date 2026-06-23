@@ -37,20 +37,23 @@ from h5 import HDFArchive
 
 # --- Physical and run parameters ---------------------------------------------
 seedname = "vasp"
-beta = 10.0          # inverse temperature (1/eV)
+beta = 20.0          # inverse temperature (1/eV)
 U    = 4.50          # Kanamori intra-orbital interaction (eV)
 J    = 0.65          # Hund's coupling (eV)
 Up   = U -2*J        # inter-orbital interaction (rotationally invariant choice)
 n_iw = 1000          # number of Matsubara frequencies
-n_total_loops = 6    # outer CSC (DFT charge) iterations
+n_total_loops = 10    # outer CSC (DFT charge) iterations
 n_dmft_loops  =  1   # inner DMFT iterations per outer loop
+n_iter_dft    =  2   # VASP SCF steps per outer loop (>1 for ALGO that needs
+                     # several charge updates before DMFT; Sigma is held fixed
+                     # and the charge correction is recomputed between steps)
 
 # --- DFT driver --------------------------------------------------------------
 # Wrap the dftkit VASP driver in the modest DftDriver. The VASP driver launches
 # vasp_command under MPI and converts the output via PLOVasp (plo.cfg).
 driver = DftDriver(VaspDriver(seedname=seedname, plo_cfg="plo.cfg",
                                mpi_handler=MPIHandler(mpi_exec="mpirun -np 16"),
-                               vasp_command="/fsc/home/hampel/git/vasp/master-cmake/build_gnu/bin/vasp_std"))
+                               vasp_command="vasp_std"))
 
 # Run the initial DFT, convert the output, and return the target electron count
 # together with the one-body elements (Kohn-Sham Hamiltonian + projectors).
@@ -114,7 +117,7 @@ try:
             Delta = M.symmetrize(M.hybridization(Eimp, Gloc, Sigma_imp_dynamic, Sigma_imp_static), deg_blocks)
 
             solver_params = dict(n_iw=n_iw, n_tau=10*n_iw, length_cycle=50,
-                                 n_cycles = int(1e+6/mpi.size),
+                                 n_cycles = int(4e+6/mpi.size),
                                  n_warmup_cycles = int(1e+4),
                                  perform_tail_fit=True,
                                  fit_min_w=10, fit_max_w=14,
@@ -159,6 +162,8 @@ try:
                 ar[path]["Delta_iw"]        = Delta
                 ar[path]["Eimp"]            = Eimp
                 ar[path]["Gloc_iw"]         = Gloc
+                ar[path]["Gimp_iw"]         = solver_results.G_iw
+                ar[path]["Sigma_iw"]        = solver_results.Sigma_iw
                 ar[path]["Sigma_iw_static"] = solver_results.Sigma_HartreeFock
                 ar[path]["Sigma_dc"]        = Sigma_imp_dc
 
@@ -169,7 +174,18 @@ try:
         if n_iter < n_total_loops - 1:
             mpi.report(f"Calling VASP charge update / DFT driver "
                        f"(global iter {n_iter+1}/{n_total_loops})...")
-            obe = driver.update_one_body_elements_with_charge_correction(N_k, Eint_m_dc)[1]
+            # Run n_iter_dft VASP charge-update steps with the self-energy held
+            # fixed. Between steps the projectors change, so recompute mu and the
+            # charge density correction from the freshly converted one-body
+            # elements. The last step is followed directly by DMFT, which
+            # recomputes everything, so no recompute is needed there.
+            for i_dft in range(n_iter_dft):
+                obe = driver.update_one_body_elements_with_charge_correction(N_k, Eint_m_dc)[1]
+                if i_dft == n_iter_dft - 1:
+                    break
+                Sigma_C_dynamic, Sigma_C_static = E.embed([Sigma_imp_dynamic], [Sigma_imp_static_minus_dc])
+                mu = M.find_chemical_potential(target_density, obe, Sigma_C_dynamic, Sigma_C_static)
+                N_k = M.charge_density_correction(obe, mu, Sigma_C_dynamic, Sigma_C_static)
 
 finally:
     # Ensure VASP is killed even if the script crashes
