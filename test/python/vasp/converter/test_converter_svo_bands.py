@@ -41,6 +41,14 @@ class TestConverterSVOBands(mytest.MyTestCase):
             self.assertEqual(hopping.shape[2], n_orb_max)
             self.assertEqual(hopping.shape[3], n_orb_max)
 
+            # High-symmetry k-path labels read from vaspout.h5 (/input/kpoints_opt).
+            # The path is GAMMA-X-M-GAMMA-R with 50 points per segment; the shared
+            # endpoints of adjacent segments are collapsed into a single tick.
+            assert 'kpts_labels' in bands, "Missing kpts_labels in dft_bands_input"
+            assert 'kpts_labels_idx' in bands, "Missing kpts_labels_idx in dft_bands_input"
+            self.assertEqual(list(bands['kpts_labels']), ['GAMMA', 'X', 'M', 'GAMMA', 'R'])
+            np.testing.assert_array_equal(bands['kpts_labels_idx'], [0, 49, 99, 149, 199])
+
         with HDFArchive(vasp_dir + 'vaspout.h5', 'r') as src:
             eig = src['results/electron_eigenvalues_kpoints_opt/eigenvalues']
             efermi = float(src['results/electron_dos/efermi'])

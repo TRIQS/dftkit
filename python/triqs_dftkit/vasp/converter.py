@@ -458,6 +458,56 @@ class Converter(ConverterTools):
                 return value.decode('ascii').strip()
             return str(value).strip()
 
+        def _read_kpath_labels(vaspout_path, n_k):
+            """
+            Read the high-symmetry k-path labels for a KPOINTS_OPT line-mode run
+            directly from vaspout.h5 (/input/kpoints_opt) and map them onto the
+            flattened band k-point index.
+
+            Returns (labels, idx) where labels is a list of label strings and idx
+            is a 0-based numpy int array giving, for each label, the position of
+            that high-symmetry point in the n_k band path. Consecutive duplicate
+            labels at segment boundaries (e.g. the shared endpoint of two adjacent
+            segments) are collapsed into a single tick. Returns (None, None) if no
+            line-mode label data is available.
+            """
+            try:
+                with HDFArchive(vaspout_path, 'r') as ar:
+                    kopt = ar['input/kpoints_opt']
+                    mode = _decode_string(kopt['mode'])
+                    raw_labels = kopt['labels_kpoints']
+                    nkps = int(kopt['number_kpoints'])
+            except KeyError:
+                return None, None
+
+            if mode.lower() != 'l' or nkps <= 0:
+                return None, None
+
+            labels = [_decode_string(lbl) for lbl in raw_labels]
+            n_seg = n_k // nkps
+            # KPOINTS_OPT line mode stores two labels (start, end) per segment.
+            if 2 * n_seg != len(labels):
+                mpi.report("convert_bands_input: KPOINTS_OPT label count (%i) inconsistent with %i segments; skipping k-path labels." % (len(labels), n_seg))
+                return None, None
+
+            merged_labels = []
+            merged_idx = []
+            for i, lab in enumerate(labels):
+                if not lab:
+                    continue
+                seg = i // 2
+                idx = seg * nkps if i % 2 == 0 else seg * nkps + nkps - 1
+                # Collapse the shared endpoint of two adjacent segments.
+                if merged_labels and merged_labels[-1] == lab and idx - merged_idx[-1] == 1:
+                    continue
+                merged_labels.append(lab)
+                merged_idx.append(idx)
+
+            if not merged_labels:
+                return None, None
+
+            return merged_labels, numpy.array(merged_idx, dtype=int)
+
         mpi.report("Processing VASP KPOINTS_OPT band/projector data...")
 
         def _to_complex(array):
@@ -693,10 +743,15 @@ class Converter(ConverterTools):
         n_parproj = numpy.array([0])
         proj_mat_all = numpy.array([0])
 
+        kpts_labels, kpts_labels_idx = _read_kpath_labels(vaspout_h5, n_k)
+
         with HDFArchive(self.hdf_file, 'a') as ar:
             if not (self.bands_subgrp in ar):
                 ar.create_group(self.bands_subgrp)
             things_to_save = ['n_k', 'n_orbitals', 'proj_mat', 'hopping', 'n_parproj', 'proj_mat_all']
+            if kpts_labels is not None:
+                things_to_save += ['kpts_labels', 'kpts_labels_idx']
+                mpi.report("  Stored %i high-symmetry k-path labels: %s" % (len(kpts_labels), ', '.join(kpts_labels)))
             for it in things_to_save:
                 ar[self.bands_subgrp][it] = locals()[it]
 
