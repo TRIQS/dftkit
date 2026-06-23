@@ -98,6 +98,34 @@ def real_harmonic_rotation(R, l):
         "Higher l (f electrons) needs the Wigner-D / rank-l tensor extension.")
 
 
+def _subspace_invariance(T, R_cart, l):
+    """
+    Maximum 'leakage' of the correlated subspace out of itself under the real-
+    harmonic representation D(R).
+
+    The correlated orbitals span the row space of ``T`` (shape ``(dim, 2l+1)``)
+    inside the (2l+1)-dimensional real-harmonic space. The returned value is
+    ``max_R || (1 - P) D(R) P ||_2`` with ``P`` the orthogonal projector onto
+    that subspace. It is zero iff the subspace is invariant under every ``R``
+    (the condition for ``Q = T D T^dag`` to be a group representation). The
+    measure is gauge-free: it depends only on the span of ``T``, not on its
+    particular rows, so a non-orthonormal or rotated transform gives the same
+    answer.
+    """
+    nm = 2 * l + 1
+    T = np.asarray(T, dtype=complex)
+    # Orthonormal basis of the row span via SVD (rows of Vh with non-zero sv).
+    _, s, Vh = np.linalg.svd(T, full_matrices=False)
+    Q = Vh[s > 1e-10]                 # (r, nm), orthonormal rows
+    P = Q.conj().T @ Q                # (nm, nm) Hermitian projector
+    eye = np.eye(nm)
+    viol = 0.0
+    for R in R_cart:
+        D = real_harmonic_rotation(R, l).astype(complex)
+        viol = max(viol, np.linalg.norm((eye - P) @ D @ P, ord=2))
+    return viol
+
+
 # ---------------------------------------------------------------------------
 # Reading the VASP symmetry data from vaspout.h5
 # ---------------------------------------------------------------------------
@@ -260,6 +288,25 @@ def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO):
     n_symm = len(R_cart)
     n_corr = len(corr_shells)
 
+    # The projected operations Q = T D(R) T^dag form a representation of the
+    # point group on the correlated orbitals only if the orbital subspace (the
+    # row span of T) is invariant under every D(R). If it is not (e.g. an
+    # arbitrary LOCPROJ subset that splits a degenerate multiplet such as t2g),
+    # the symmetrization of any k-summed quantity on the IBZ is invalid: the
+    # missing partners would be needed to close the star. Refuse rather than
+    # silently produce a wrong full-BZ average.
+    for ish, csh in enumerate(corr_shells):
+        viol = _subspace_invariance(transforms[ish], R_cart, csh['l'])
+        if viol > 1e-6:
+            raise RuntimeError(
+                f"IBZ symmetrization: the correlated subspace of shell {ish} "
+                f"(atom {csh.get('atom')}, l={csh['l']}, dim={csh['dim']}) is not "
+                f"invariant under the crystal point group (leakage {viol:.2e}). The "
+                "chosen orbital set is not symmetry-closed, so k-summed quantities "
+                "cannot be symmetrized on the irreducible BZ. Use a symmetry-adapted "
+                "orbital set (the full 2l+1 shell, or a complete irrep such as t2g or "
+                "eg in cubic symmetry), or run on the full grid (use_ibz=False).")
+
     # symmetrization matrices: mat[g] = list over corr shells of (dim x dim)
     mat = []
     for R in R_cart:
@@ -292,36 +339,3 @@ def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO):
     return dict(n_symm=n_symm, n_atoms=natom, perm=perm, orbits=corr_shells,
                 SO=SO, SP=SP, time_inv=time_inv, mat=mat, mat_tinv=mat_tinv,
                 n_k_ibz=sym['n_k_ibz'], ibz_weights=sym['ibz_weights'])
-
-
-def read_transforms_from_plo_cfg(plo_cfg, corr_shells):
-    """
-    Read the per-correlated-shell TRANSFORM matrices from a PLO config file.
-
-    Returns a list (one per corr shell) of (dim, 2l+1) complex arrays. Falls
-    back to the identity for any shell without an explicit transform.
-    """
-    from .plovasp.inpconf import ConfigParameters
-    cp = ConfigParameters(plo_cfg)
-    cp.parse_input()
-
-    # Expand config shells (which may list several ions) to per-ion shells in
-    # the same order the converter uses to build corr_shells.
-    cfg_per_ion = []
-    for sh in cp.shells:
-        l = sh['lshell']
-        nm = 2 * l + 1
-        tmat = np.asarray(sh['tmatrix'], dtype=complex) if 'tmatrix' in sh \
-            else np.identity(nm, dtype=complex)
-        nion = sh['ions']['nion']
-        for _ in range(nion):
-            cfg_per_ion.append((l, tmat))
-
-    transforms = []
-    for ish, csh in enumerate(corr_shells):
-        if ish < len(cfg_per_ion) and cfg_per_ion[ish][0] == csh['l']:
-            transforms.append(cfg_per_ion[ish][1])
-        else:
-            nm = 2 * csh['l'] + 1
-            transforms.append(np.identity(nm, dtype=complex)[:csh['dim'], :])
-    return transforms

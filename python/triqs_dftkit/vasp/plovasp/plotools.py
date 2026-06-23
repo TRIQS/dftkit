@@ -417,7 +417,12 @@ def plo_output(conf_pars, el_struct, pshells, pgroups):
             sh_dict['ion_list'] = ion_output
             sh_dict['ion_sort'] = shell.ion_sort
 
-# TODO: add the output of transformation matrices
+# Per-ion transformation matrices (real harmonics -> correlated orbitals),
+# shape (nion, ndim, 2l+1). Stored split into real/imag because JSON has no
+# complex type. Consumed by the converter to build the correlated-shell
+# symmetry operations for IBZ runs (no need to re-parse the PLO config).
+            sh_dict['tmatrix_re'] = shell.tmatrices.real.tolist()
+            sh_dict['tmatrix_im'] = shell.tmatrices.imag.tolist()
 
             head_shells.append(sh_dict)
 

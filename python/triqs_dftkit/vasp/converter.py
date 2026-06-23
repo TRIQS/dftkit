@@ -155,9 +155,10 @@ class Converter(ConverterTools):
             Path to vaspout.h5 holding the k-point symmetry data. Default
             'vaspout.h5'.
         plo_cfg : string, optional
-            Path to the PLO config file, used to read the per-shell TRANSFORM
-            matrices needed to build the correlated-orbital symmetry matrices.
-            Default 'plo.cfg'.
+            Deprecated and unused. The per-shell TRANSFORM matrices needed to
+            build the correlated-orbital symmetry operations are now read from
+            the PLOVASP output (the .pg header), so the PLO config is no longer
+            re-parsed here. Kept only for backward-compatible call signatures.
         """
         energy_unit = 1.0 # VASP interface always uses eV
         k_dep_projection = 1
@@ -234,6 +235,7 @@ class Converter(ConverterTools):
 
                 shells = []
                 corr_shells = []
+                corr_transforms = []   # per corr-shell (dim x 2l+1) real-harmonic -> orbital transform
                 shion_to_shell = [[] for ish in range(len(p_shells))]
                 cr_shion_to_shell = [[] for ish in range(len(p_shells))]
                 shorbs_to_globalorbs = [[] for ish in range(len(p_shells))]
@@ -261,6 +263,16 @@ class Converter(ConverterTools):
                             shion_to_shell[ish].append(icsh)
                             icsh += 1
                             corr_shells.append(pars)
+                            # Transform built by PLOVASP for this ion, read straight
+                            # from the .pg header (no plo.cfg re-parse). Falls back to
+                            # the identity for legacy files written without it.
+                            if 'tmatrix_re' in sh:
+                                tm = (numpy.array(sh['tmatrix_re'][i], dtype=float)
+                                      + 1j * numpy.array(sh['tmatrix_im'][i], dtype=float))
+                            else:
+                                nm = 2 * pars['l'] + 1
+                                tm = numpy.identity(nm, dtype=complex)[:pars['dim'], :]
+                            corr_transforms.append(tm)
 
 
 # TODO: generalize this to the case of multiple shell groups
@@ -426,8 +438,7 @@ class Converter(ConverterTools):
                        "full k-grid.")
 
         if use_ibz:
-            transforms = _sym.read_transforms_from_plo_cfg(plo_cfg, corr_shells)
-            symm_data = _sym.build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO)
+            symm_data = _sym.build_symmcorr(vasp_h5, corr_shells, corr_transforms, SP, SO)
             nkibz = int(symm_data['n_k_ibz'])
             mpi.report(f"  IBZ mode: reducing {n_k} k-points to {nkibz} irreducible "
                        f"k-points with {symm_data['n_symm']} symmetry operations.")
