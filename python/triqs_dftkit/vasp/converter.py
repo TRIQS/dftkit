@@ -438,6 +438,32 @@ class Converter(ConverterTools):
                        "full k-grid.")
 
         if use_ibz:
+            # Guard against under-determined correlated shells. If VASP emitted
+            # only a subset of the 2l+1 real harmonics (e.g. a partial LOCPROJ
+            # selection) without a TRANSFORM defining a proper subspace, the
+            # absent orbitals are zero-filled in proj_mat. Their symmetry
+            # partners are missing, so symmetrizing on the IBZ would leak the
+            # kept orbitals into the dead ones (the invariance guard cannot see
+            # this: an identity transform is trivially invariant). Detect and
+            # refuse before building the symmetry operations.
+            for icrsh, csh in enumerate(corr_shells):
+                dim = csh['dim']
+                orb_weight = numpy.max(numpy.abs(proj_mat[:, :, icrsh, :dim, :]),
+                                       axis=(0, 1, 3))            # (dim,)
+                scale = orb_weight.max()
+                dead = numpy.where(orb_weight <= max(1e-10, 1e-8 * scale))[0]
+                if scale > 0 and len(dead) > 0:
+                    raise RuntimeError(
+                        f"IBZ symmetrization: correlated shell {icrsh} (atom "
+                        f"{csh.get('atom')}, l={csh['l']}, dim={dim}) has zero-weight "
+                        f"projector orbital(s) {list(map(int, dead))}. This happens when "
+                        "only a subset of the 2l+1 real harmonics was projected (e.g. a "
+                        "partial LOCPROJ selection) without a TRANSFORM defining a "
+                        "symmetry-adapted subspace. The missing symmetry partners cannot "
+                        "be restored, so the k-sum cannot be symmetrized on the "
+                        "irreducible BZ. Project the full shell (or a complete irrep via "
+                        "TRANSFORM), or run on the full grid (use_ibz=False).")
+
             symm_data = _sym.build_symmcorr(vasp_h5, corr_shells, corr_transforms, SP, SO)
             nkibz = int(symm_data['n_k_ibz'])
             mpi.report(f"  IBZ mode: reducing {n_k} k-points to {nkibz} irreducible "
