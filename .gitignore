@@ -6,7 +6,7 @@ doc/cpp2rst_generated
 # VASP pseudopotentials are copyrighted and must not be committed (anywhere)
 POTCAR
 
-# VASP run outputs (inputs INCAR, KPOINTS, POSCAR, plo.cfg stay tracked)
+# VASP run outputs
 CHG
 CHGCAR
 CONTCAR
