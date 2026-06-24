@@ -47,6 +47,11 @@ cast = dp.reptrans('cubic', 2, cast=True)
 assert exact.shape == (5, 5)
 # unitary
 assert np.max(np.abs(exact @ np.conj(exact.T) - np.eye(5))) < 1e-12
+# the l = 1 (p) table is unitary too: it was un-normalized and mis-ordered,
+# and only the d path was covered before (the non-centrosymmetric p bug).
+p1 = dp.reptrans('cubic', 1, cast=False)
+assert p1.shape == (3, 3)
+assert np.max(np.abs(p1 @ np.conj(p1.T) - np.eye(3))) < 1e-12
 # the cast truncates 1/sqrt2 to single precision (the dmftproj #148 noise)
 assert abs(abs(exact[1, 0]) - 2 ** -0.5) < 1e-15
 assert 0 < abs(abs(cast[1, 0]) - 2 ** -0.5) < 1e-6

@@ -104,7 +104,9 @@ def read_two_complex(r):
 _COMPLEX = {l: np.eye(2 * l + 1, dtype=complex) for l in range(4)}
 
 _CUBIC = {
-    1: np.array([[0, 1, 0], [-1j, 0, -1j], [1, 0, -1]], dtype=complex),
+    1: np.array([[2 ** -0.5, 0, -(2 ** -0.5)],
+                 [-1j * 2 ** -0.5, 0, -1j * 2 ** -0.5],
+                 [0, 1, 0]], dtype=complex),
     2: np.array([
         [0, 0, 1, 0, 0],
         [2 ** -0.5, 0, 0, 0, 2 ** -0.5],
