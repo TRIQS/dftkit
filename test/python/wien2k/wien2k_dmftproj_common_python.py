@@ -47,11 +47,29 @@ cast = dp.reptrans('cubic', 2, cast=True)
 assert exact.shape == (5, 5)
 # unitary
 assert np.max(np.abs(exact @ np.conj(exact.T) - np.eye(5))) < 1e-12
+# the l = 1 (p) table is unitary too: it was un-normalized and mis-ordered,
+# and only the d path was covered before (the non-centrosymmetric p bug).
+p1 = dp.reptrans('cubic', 1, cast=False)
+assert p1.shape == (3, 3)
+assert np.max(np.abs(p1 @ np.conj(p1.T) - np.eye(3))) < 1e-12
 # the cast truncates 1/sqrt2 to single precision (legacy constructor rounding)
 assert abs(abs(exact[1, 0]) - 2 ** -0.5) < 1e-15
 assert 0 < abs(abs(cast[1, 0]) - 2 ** -0.5) < 1e-6
 assert dp.reptrans('complex', 2).shape == (5, 5)
 assert np.allclose(dp.reptrans('complex', 2), np.eye(5))
+
+# The tellurium representative has a nontrivial local frame. Its composed
+# orbital rotation must stay unitary and must include more than the atom-mapping
+# symmetry operation alone.
+_, te_ops, te_refs = dp.read_dmftsym(os.path.join(HERE, 'Te.dmftsym'),
+                                    rotloc=True)
+te_rot = dp.rotloc_orbital(1, te_refs[0], te_ops, 1, 1)
+np.testing.assert_allclose(te_rot @ te_rot.conj().T, np.eye(3),
+                           atol=1e-12, rtol=0)
+mapping = next(op for op in te_ops if op['perm'][0] == 1)
+mapping_only = dp.dmat(1, mapping['a'], mapping['b'], mapping['g'],
+                       float(mapping['iprop']))
+assert np.max(np.abs(te_rot - mapping_only)) > 0.1
 
 
 # --- Wigner D and orbital time reversal --------------------------------------

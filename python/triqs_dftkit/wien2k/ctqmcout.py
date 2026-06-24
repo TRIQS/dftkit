@@ -60,9 +60,9 @@ import numpy as np
 from scipy.linalg.lapack import zheev
 from scipy.linalg.blas import zgemm
 
-from ._dmftproj import (require_identity_struct, validate_so_windows, band_index_window, dmat, fmt_scalar, read_almblm,
+from ._dmftproj import (validate_so_windows, band_index_window, dmat, fmt_scalar, read_almblm,
                         read_dmftsym, read_fromfile, read_indmftpr, reptrans,
-                        rotloc_rotl_so, select_band_window, select_window,
+                        rotloc_orbital, rotloc_rotl_so, select_band_window, select_window,
                         tmat, write_row)
 
 
@@ -113,34 +113,23 @@ def _build_orbs(info):
 
 # --- Rloc spinor representation (set_rotloc.f / setsym.f) ---------------------
 
-def _rloc_rotrep(op, l, transmat, ifSO):
-    """rotloc%rotrep(l)%mat, the Rloc rotation in the new basis for a non-mixing
-    shell, with identity struct local rotation (rotloc_ref Euler = 0).
-
-    Under SO it is the 2(2l+1) spinor rotation: rotloc%rotl =
-    blkdiag(ephase*D, conj(ephase)*D), rotrep = S rotl S^H, S =
-    blkdiag(transmat, transmat). Without SO srot%timeinv is always false, there
-    is no spin phase, and it reduces to the bare (2l+1) transmat D transmat^H
+def _rloc_rotrep(l, ref, ops, iatom, iref, transmat, ifSO):
+    """rotloc(iatom)%rotrep(l)%mat for a non-mixing shell: the composed Rloc
+    spinor rotation rotloc_ref then the symmetry op mapping iref onto iatom
+    (set_rotloc.f / setsym.f), put into the new basis with S = blkdiag(transmat,
+    transmat). Shares rotloc_rotl_so with the mixing path so the non-trivial
+    struct reference rotation rotloc_ref (e.g. Te, beta=pi/2) is not dropped.
+    Without SO it reduces to the bare (2l+1) D(op)D(ref) transmat sandwich
     (set_rotloc.f non-SO branch). Returns (rotrep, timeinv)."""
-    a, b, g, iprop = op['a'], op['b'], op['g'], op['iprop']
-    D = dmat(l, a, b, g, float(iprop))
     if not ifSO:
+        D = rotloc_orbital(l, ref, ops, iatom, iref)
         return transmat @ D @ np.conj(transmat.T), False
-    krotm = op['krotm']
-    det2 = krotm[0, 0] * krotm[1, 1] - krotm[0, 1] * krotm[1, 0]
-    timeinv = det2 < 0.0
-    phase = (g - a) if timeinv else (a + g)
-    if timeinv:
-        D = tmat(l) @ np.conj(D)       # setsym.f:320-326 orbital time reversal
-    ephase = np.exp(1j * phase / 2)
+    rotl, timeinv = rotloc_rotl_so(l, ref, ops, iatom, iref)
     d = 2 * l + 1
-    rotl = np.zeros((2 * d, 2 * d), dtype=complex)
-    rotl[:d, :d] = ephase * D
-    rotl[d:, d:] = np.conj(ephase) * D
     S = np.zeros((2 * d, 2 * d), dtype=complex)
     S[:d, :d] = transmat
     S[d:, d:] = transmat
-    rotrep = S @ rotl @ np.conj(S.T)
+    rotrep = (S @ rotl @ S.T) if timeinv else (S @ rotl @ np.conj(S.T))
     return rotrep, timeinv
 
 
@@ -159,7 +148,6 @@ def write_ctqmcout(case):
     """Read <case>.almblm{up,dn}, <case>.indmftpr, <case>.struct,
     <case>.dmftsym and write <case>.ctqmcout in the dmftproj format."""
     info = read_indmftpr(case + '.indmftpr')
-    require_identity_struct(case)
     nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
 
     up, dn = case + '.almblmup', case + '.almblmdn'
@@ -241,12 +229,6 @@ def write_ctqmcout(case):
     # rot_projectmat applies dmat(l, a, b, g, iprop) in the |lm> basis
     # (rot_projectmat.f:59-65). For atom 2 this is a non-trivial in-plane
     # rotation (a=270) that mixes the m-rows; omitting it flips the m=1,2 rows.
-    rotloc_op = {}
-    for icr, cr in enumerate(crorbs):
-        iref = sum(info['mult'][:cr['sort'] - 1]) + 1
-        rotloc_op[icr] = next(o for o in ops
-                              if o['perm'][iref - 1] == cr['atom'])
-
     # ---- raw correlated projector mat_rep, then Loewdin orthonormalize ----
     # Non-mixing: mat_rep[(icr, ik, is)] -> (2l+1, nbsel) per spin block.
     # Mixing: mat_rep[(icr, ik)] -> (2*(2l+1), nbsel), the stacked spinor block.
@@ -258,8 +240,8 @@ def write_ctqmcout(case):
         d = 2 * l + 1
         transmat = transmats[(l, sort)]
         ismix = mixing[(l, sort)]
-        op = rotloc_op[icr]
-        rot = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+        ref = rotloc_ref[sort - 1]
+        rot = rotloc_orbital(l, ref, ops, atom, sum(info['mult'][:sort - 1]) + 1)
         for ik in range(nk):
             incl, nb_bot, nb_top = windows[ik]
             if not incl:
@@ -339,8 +321,8 @@ def write_ctqmcout(case):
             rloc_blocks.append(_rloc_rotrep_mixing(
                 l, rotloc_ref[cr['sort'] - 1], ops, cr['atom'], iref, transmat))
         else:
-            op = next(o for o in ops if o['perm'][iref - 1] == cr['atom'])
-            rloc_blocks.append(_rloc_rotrep(op, l, transmat, ifSO))
+            rloc_blocks.append(_rloc_rotrep(
+                l, rotloc_ref[cr['sort'] - 1], ops, cr['atom'], iref, transmat, ifSO))
 
     # ---- write ----
     with open(case + '.ctqmcout', 'w') as f:
