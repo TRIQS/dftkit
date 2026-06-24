@@ -57,9 +57,9 @@ rot_dens.f / setsym.f / set_rotloc.f for the symmetrization and Rloc rotation.
 import os
 import numpy as np
 
-from ._dmftproj import (build_orbs as _build_orbs, require_identity_struct, validate_spin_windows, band_index_window, dmat, mixing_rotrep, read_almblm, read_dmftsym,
+from ._dmftproj import (build_orbs as _build_orbs, validate_spin_windows, band_index_window, dmat, mixing_rotrep, read_almblm, read_dmftsym,
                         read_fromfile, read_indmftpr, reptrans,
-                        rotloc_rotl_so, select_band_window, select_window, tmat, write_row)
+                        rotloc_orbital, rotloc_rotl_so, select_band_window, select_window, tmat, write_row)
 
 
 def _op_timeinv(op, ifSO=True):
@@ -117,15 +117,14 @@ def _srot_rotrep_nonmixing(op, l, transmat, ifSO=True):
 
 # --- rotloc rotrep (set_rotloc.f) under SP+SO, non-mixing --------------------
 
-def _rotloc_rotrep_nonso(orb, ops, info, transmat):
+def _rotloc_rotrep_nonso(orb, ops, info, ref, transmat):
     """rotloc(iatom)%rotrep(l)%mat without SO: the bare (2l+1) Rloc rotation in
     the new basis, transmat D(Rloc)_{lm} transmat^H with D(Rloc) the symmetry op
     mapping the sort representative onto this atom (set_rotloc.f non-SO branch).
     srot%timeinv is always false under non-SO, so timeinv=False."""
     l = orb['l']
     iref = sum(info['mult'][:orb['sort'] - 1]) + 1
-    op = next(o for o in ops if o['perm'][iref - 1] == orb['atom'])
-    D = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+    D = rotloc_orbital(l, ref, ops, orb['atom'], iref)
     return transmat @ D @ np.conj(transmat.T), False
 
 
@@ -422,7 +421,6 @@ def write_parproj(case):
     """Read <case>.almblm{up,dn}, <case>.indmftpr, <case>.struct,
     <case>.dmftsym and write <case>.parproj in the dmftproj format."""
     info = read_indmftpr(case + '.indmftpr')
-    require_identity_struct(case)
     nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
 
     spin_files = [case + '.almblmup', case + '.almblmdn']
@@ -476,12 +474,6 @@ def write_parproj(case):
 
     # rot_projectmat local rotation: the op mapping the representative atom of
     # the sort onto this atom (set_projections.f via rot_projectmat).
-    rotloc_op = {}
-    for o in orbs:
-        iref = sum(info['mult'][:o['sort'] - 1]) + 1
-        rotloc_op[o['atom']] = next(op for op in ops
-                                    if op['perm'][iref - 1] == o['atom'])
-
     # ---- projectors matn_rep per orbital (energy window for block A, full
     # band range for the density matrix) ----
     matn_reps = {}
@@ -489,8 +481,9 @@ def write_parproj(case):
     for o in orbs:
         l = o['l']
         transmat = transmats[(l, o['sort'])]
-        op = rotloc_op[o['atom']]
-        rot = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+        ref = rotloc_ref[o['sort'] - 1]
+        iref = sum(info['mult'][:o['sort'] - 1]) + 1
+        rot = rotloc_orbital(l, ref, ops, o['atom'], iref)
         if mixing[(l, o['sort'])]:
             matn_reps[(o['atom'], o['l'])] = _build_matn_rep_mixing(
                 o, info, spins, windows, transmat, rot)
@@ -506,11 +499,11 @@ def write_parproj(case):
     rotloc_rotrep = {}
     for o in orbs:
         transmat = transmats[(o['l'], o['sort'])]
+        ref = rotloc_ref[o['sort'] - 1]
         if not ifSO:
             rotloc_rotrep[(o['atom'], o['l'])] = _rotloc_rotrep_nonso(
-                o, ops, info, transmat)
+                o, ops, info, ref, transmat)
         else:
-            ref = rotloc_ref[o['sort'] - 1]
             rotloc_rotrep[(o['atom'], o['l'])] = _rotloc_rotrep_so(
                 o, ops, info, ref, transmat, mixing[(o['l'], o['sort'])])
 

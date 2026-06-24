@@ -51,8 +51,8 @@ import os
 import numpy as np
 from scipy.linalg.blas import zgemm
 
-from ._dmftproj import (require_identity_struct, validate_spin_windows, dmat, read_almblm, read_dmftsym, read_fromfile,
-                        read_indmftpr, reptrans, select_window, to_float,
+from ._dmftproj import (validate_spin_windows, dmat, read_almblm, read_dmftsym, read_fromfile,
+                        read_indmftpr, reptrans, rotloc_orbital, select_window, to_float,
                         write_row)
 from .ctqmcout import _build_crorbs, _sqrt_inv
 from .parproj import (_build_matn_rep, _build_matn_rep_mixing, _build_orbs)
@@ -108,7 +108,6 @@ def write_outband(case):
     info, eferm = _read_indmftpr_band(case + '.indmftpr')
     if not info['so']:
         raise NotImplementedError('non-spin-orbit projectors are not implemented yet')
-    require_identity_struct(case)
     if info['proj_mode'] != 0:
         raise NotImplementedError('this output currently supports projection mode 0')
     nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
@@ -158,12 +157,6 @@ def write_outband(case):
 
     # rot_projectmat local rotation: the op mapping the sort representative onto
     # this atom (set_projections.f via rot_projectmat). Same as ctqmcout/parproj.
-    rotloc_op = {}
-    for o in orbs:
-        iref = sum(info['mult'][:o['sort'] - 1]) + 1
-        rotloc_op[o['atom']] = next(op for op in ops
-                                    if op['perm'][iref - 1] == o['atom'])
-
     # ---- correlated projector mat_rep, then Loewdin orthonormalize ----
     mat_rep = {}
     for icr, cr in enumerate(crorbs):
@@ -173,8 +166,8 @@ def write_outband(case):
         d = 2 * l + 1
         transmat = transmats[(l, sort)]
         ismix = mixing[(l, sort)]
-        op = rotloc_op[atom]
-        rot = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+        ref = rotloc_ref[sort - 1]
+        rot = rotloc_orbital(l, ref, ops, atom, sum(info['mult'][:sort - 1]) + 1)
         for ik in range(nk):
             incl, nb_bot, nb_top = windows[ik]
             if not incl:
@@ -236,8 +229,9 @@ def write_outband(case):
     for o in orbs:
         l = o['l']
         transmat = transmats[(l, o['sort'])]
-        op = rotloc_op[o['atom']]
-        rot = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+        ref = rotloc_ref[o['sort'] - 1]
+        iref = sum(info['mult'][:o['sort'] - 1]) + 1
+        rot = rotloc_orbital(l, ref, ops, o['atom'], iref)
         if mixing[(l, o['sort'])]:
             matn_reps[(o['atom'], o['l'])] = _build_matn_rep_mixing(
                 o, info, spins, windows, transmat, rot)
