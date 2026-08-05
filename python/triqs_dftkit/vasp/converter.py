@@ -548,7 +548,9 @@ class Converter(ConverterTools):
         n_atoms = 1
         perm = [0]
         n_orbits = len(orbits)
-        SP = ctrl_head['ns']
+# Note the difference in name conventions: 'ns' counts the spin channels,
+# whereas SP is a flag, as in convert_dft_input() above
+        SP = ctrl_head['ns'] - 1
         SO = ctrl_head['nc_flag']
         time_inv = [0]
         mat = [numpy.identity(1)]

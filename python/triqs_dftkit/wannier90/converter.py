@@ -763,8 +763,9 @@ def read_all_wannier90_data(n_spin_blocks, dim_corr_shells, w90_seed, add_lambda
         Number of bands
     k_mesh_from_umat : np.ndarray[n_k, 3] of float
         The k points as used in wannier for consistency. None if not bloch_basis
-    centres: np.ndarray[n_spin_blocks, 3, 3] of float or None
-        Centres of wannier functions
+    centres: np.ndarray[n_spin_blocks, n_wannier, 3] of float or None
+        Centres of the wannier functions in cartesian coordinates (Angstrom).
+        None if seedname_centres.xyz is not present.
     """
     spin_w90name = ['_up', '_down']
     wannier_hr = []
