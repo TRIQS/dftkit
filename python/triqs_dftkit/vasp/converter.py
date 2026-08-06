@@ -137,15 +137,32 @@ class Converter(ConverterTools):
 
         return header, f_gen, fh
 
-    def convert_dft_input(self):
+    def convert_dft_input(self, use_ibz=None, vasp_h5='vaspout.h5', plo_cfg='plo.cfg'):
         """
         Reads the input files, and stores the data in the HDFfile
+
+        Parameters
+        ----------
+        use_ibz : bool or None, optional
+            Run on the irreducible Brillouin zone (IBZ) with symmetrization
+            instead of unfolding to the full k-grid. Requires the VASP symmetry
+            data in ``vasp_h5``. If ``None`` (default) the IBZ path is enabled
+            automatically whenever symmetry was used (n_k_ibz < n_k) and the
+            symmetry data is available; otherwise the converter falls back to
+            the full grid. In text-based mode (no vaspout.h5) a warning is
+            printed suggesting the h5 interface.
+        vasp_h5 : string, optional
+            Path to vaspout.h5 holding the k-point symmetry data. Default
+            'vaspout.h5'.
+        plo_cfg : string, optional
+            Deprecated and unused. The per-shell TRANSFORM matrices needed to
+            build the correlated-orbital symmetry operations are now read from
+            the PLOVASP output (the .pg header), so the PLO config is no longer
+            re-parsed here. Kept only for backward-compatible call signatures.
         """
         energy_unit = 1.0 # VASP interface always uses eV
         k_dep_projection = 1
-# Symmetries are switched off for the moment
-# TODO: implement symmetries
-        symm_op = 0                                   # Use symmetry groups for the k-sum
+        symm_op = 0                                   # Use symmetry groups for the k-sum (set to 1 in IBZ mode)
 
         # Read and write only on the master node
         if not (mpi.is_master_node()): return
@@ -218,6 +235,7 @@ class Converter(ConverterTools):
 
                 shells = []
                 corr_shells = []
+                corr_transforms = []   # per corr-shell (dim x 2l+1) real-harmonic -> orbital transform
                 shion_to_shell = [[] for ish in range(len(p_shells))]
                 cr_shion_to_shell = [[] for ish in range(len(p_shells))]
                 shorbs_to_globalorbs = [[] for ish in range(len(p_shells))]
@@ -245,6 +263,16 @@ class Converter(ConverterTools):
                             shion_to_shell[ish].append(icsh)
                             icsh += 1
                             corr_shells.append(pars)
+                            # Transform built by PLOVASP for this ion, read straight
+                            # from the .pg header (no plo.cfg re-parse). Falls back to
+                            # the identity for legacy files written without it.
+                            if 'tmatrix_re' in sh:
+                                tm = (numpy.array(sh['tmatrix_re'][i], dtype=float)
+                                      + 1j * numpy.array(sh['tmatrix_im'][i], dtype=float))
+                            else:
+                                nm = 2 * pars['l'] + 1
+                                tm = numpy.identity(nm, dtype=complex)[:pars['dim'], :]
+                            corr_transforms.append(tm)
 
 
 # TODO: generalize this to the case of multiple shell groups
@@ -385,6 +413,80 @@ class Converter(ConverterTools):
         #used for certain routines within dft_tools if treating the inputs differently is required.
         dft_code = 'vasp'
 
+# -----------------------------------------------------------------------------
+# IBZ mode: reduce the data to the irreducible BZ and build the correlated-shell
+# symmetry operations, so that DMFT can run on the IBZ with symmetrization.
+# -----------------------------------------------------------------------------
+        from . import symmetry as _sym
+        symm_data = None
+        sym_was_on = (n_k_ibz is not None) and (n_k_ibz < n_k)
+        h5_sym = _sym.read_vasp_symmetry(vasp_h5) if os.path.exists(vasp_h5) else None
+        h5_available = h5_sym is not None
+
+        if use_ibz is None:
+            use_ibz = sym_was_on and h5_available
+
+        if use_ibz and not h5_available:
+            mpi.report("  WARNING: use_ibz requested but no VASP symmetry data found in "
+                       f"'{vasp_h5}'. Falling back to the full k-grid (use_ibz=False).")
+            use_ibz = False
+        elif not h5_available:
+            mpi.report(f"  Note: running in text-based mode (no '{vasp_h5}'); using the full "
+                       "k-grid. For symmetry-reduced (IBZ) runs use the vaspout.h5 interface.")
+        elif (not use_ibz) and sym_was_on:
+            mpi.report("  Note: symmetry was used in VASP but use_ibz=False; unfolding to the "
+                       "full k-grid.")
+
+        if use_ibz:
+            # Guard against under-determined correlated shells. If VASP emitted
+            # only a subset of the 2l+1 real harmonics (e.g. a partial LOCPROJ
+            # selection) without a TRANSFORM defining a proper subspace, the
+            # absent orbitals are zero-filled in proj_mat. Their symmetry
+            # partners are missing, so symmetrizing on the IBZ would leak the
+            # kept orbitals into the dead ones (the invariance guard cannot see
+            # this: an identity transform is trivially invariant). Detect and
+            # refuse before building the symmetry operations.
+            for icrsh, csh in enumerate(corr_shells):
+                dim = csh['dim']
+                orb_weight = numpy.max(numpy.abs(proj_mat[:, :, icrsh, :dim, :]),
+                                       axis=(0, 1, 3))            # (dim,)
+                scale = orb_weight.max()
+                dead = numpy.where(orb_weight <= max(1e-10, 1e-8 * scale))[0]
+                if scale > 0 and len(dead) > 0:
+                    raise RuntimeError(
+                        f"IBZ symmetrization: correlated shell {icrsh} (atom "
+                        f"{csh.get('atom')}, l={csh['l']}, dim={dim}) has zero-weight "
+                        f"projector orbital(s) {list(map(int, dead))}. This happens when "
+                        "only a subset of the 2l+1 real harmonics was projected (e.g. a "
+                        "partial LOCPROJ selection) without a TRANSFORM defining a "
+                        "symmetry-adapted subspace. The missing symmetry partners cannot "
+                        "be restored, so the k-sum cannot be symmetrized on the "
+                        "irreducible BZ. Project the full shell (or a complete irrep via "
+                        "TRANSFORM), or run on the full grid (use_ibz=False).")
+
+            symm_data = _sym.build_symmcorr(vasp_h5, corr_shells, corr_transforms, SP, SO)
+            nkibz = int(symm_data['n_k_ibz'])
+            mpi.report(f"  IBZ mode: reducing {n_k} k-points to {nkibz} irreducible "
+                       f"k-points with {symm_data['n_symm']} symmetry operations.")
+
+            # The first nkibz points of the (plotools-ordered) full grid are the IBZ
+            # representatives, so slicing recovers the irreducible data.
+            sl = slice(0, nkibz)
+            hopping       = hopping[sl]
+            f_weights     = f_weights[sl]
+            n_orbitals    = n_orbitals[sl]
+            proj_mat      = proj_mat[sl]
+            kpts          = kpts[sl]
+            kpts_cart     = kpts_cart[sl]
+            band_window   = [bw[sl] for bw in band_window]
+            if self.proj_or_hk == 'hk' or self.proj_or_hk == True:
+                proj_mat_csc = proj_mat_csc[sl]
+            n_k = nkibz
+            self.n_k = nkibz
+            bz_weights = numpy.asarray(symm_data['ibz_weights']).copy()
+            kpt_weights = bz_weights.copy()
+            symm_op = 1
+
         # Save it to the HDF:
         with HDFArchive(self.hdf_file,'a') as ar:
             if not (self.dft_subgrp in ar): ar.create_group(self.dft_subgrp)
@@ -406,8 +508,11 @@ class Converter(ConverterTools):
             if n_k_ibz is not None:
                 ar[self.misc_subgrp]['n_k_ibz'] = n_k_ibz
 
-        # Symmetries are used, so now convert symmetry information for *correlated* orbitals:
-        self.convert_symmetry_input(ctrl_head, orbits=self.corr_shells, symm_subgrp=self.symmcorr_subgrp)
+        # Symmetry information for *correlated* orbitals:
+        if use_ibz and symm_data is not None:
+            self.write_symmetry_input(symm_data, symm_subgrp=self.symmcorr_subgrp)
+        else:
+            self.convert_symmetry_input(ctrl_head, orbits=self.corr_shells, symm_subgrp=self.symmcorr_subgrp)
 
 # TODO: Implement misc_input
 #        self.convert_misc_input(bandwin_file=self.bandwin_file,struct_file=self.struct_file,outputs_file=self.outputs_file,
@@ -527,6 +632,26 @@ class Converter(ConverterTools):
             if not (misc_subgrp in ar): ar.create_group(misc_subgrp)
             for it in things_to_save: ar[misc_subgrp][it] = locals()[it]
 
+
+    def write_symmetry_input(self, symm_data, symm_subgrp):
+        """
+        Write the correlated-shell symmetry operations (built from the VASP
+        symmetry data) to the symmetry subgroup of the HDF5 archive.
+
+        Parameters
+        ----------
+        symm_data : dict
+            Output of ``triqs_dftkit.vasp.symmetry.build_symmcorr`` holding
+            n_symm, n_atoms, perm, orbits, SO, SP, time_inv, mat, mat_tinv.
+        symm_subgrp : string
+            Name of the symmetry group in the HDF5 archive.
+        """
+        with HDFArchive(self.hdf_file, 'a') as ar:
+            if not (symm_subgrp in ar): ar.create_group(symm_subgrp)
+            things_to_save = ['n_symm', 'n_atoms', 'perm', 'orbits', 'SO', 'SP',
+                              'time_inv', 'mat', 'mat_tinv']
+            for it in things_to_save:
+                ar[symm_subgrp][it] = symm_data[it]
 
     def convert_symmetry_input(self, ctrl_head, orbits, symm_subgrp):
         """

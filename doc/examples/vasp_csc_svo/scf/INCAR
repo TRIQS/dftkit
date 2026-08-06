@@ -1,0 +1,27 @@
+System  = NiO
+
+NCORE = 1
+KPAR = 4
+
+ISMEAR = 0
+SIGMA = 0.1
+
+KSPACING = 0.2
+
+# converge wave functions
+EDIFF = 1.E-10
+NELMIN = 20
+NBANDS = 32
+
+
+# the energy window to optimize projector channels (absolute)
+EMIN = -1.0
+EMAX = 10.1
+NEDOS = 5001
+
+LMAXMIX = 4
+
+# project to Ni d and O p states
+LORBIT = 14
+LOCPROJ = "2 : d : Pr"
+

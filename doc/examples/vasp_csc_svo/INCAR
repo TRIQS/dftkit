@@ -1,0 +1,34 @@
+System  = AFM NiO
+
+# better convergence for small kpt grids
+ISMEAR = 0
+SIGMA = 0.1
+
+KSPACING = 0.2
+
+# converge wave functions
+EDIFF = 1.E-7
+
+# the energy window to optimize projector channels (absolute)
+EMIN = -1.0
+EMAX = 10.1
+NBANDS = 32
+
+LMAXMIX = 4
+
+# project to Ni d
+LORBIT = 14
+LOCPROJ = "2 : d : Pr"
+
+# CSC flags
+ICHARG = 5
+NELM = 1000
+NELMIN = 1000
+NELMDL = -2
+IMIX=4
+BMIX=0.2
+AMIX=0.02
+LSYNCH5=True
+
+LWAVE = False
+LCHG = False
