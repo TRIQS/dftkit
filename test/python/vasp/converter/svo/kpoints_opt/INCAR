@@ -6,6 +6,12 @@ EDIFF = 1.E-10
 # make sure that the wavefunction is properly converged
 NELMIN = 30
 
+# Pin NBANDS so the fixture is reproducible independent of the MPI rank count.
+# VASP rounds the default NBANDS up to a multiple of the band-group size, so at
+# 4 ranks it picks 23, the topmost eg pair drops out of the [Group 1] EWINDOW
+# and n_orbitals changes, which breaks test_converter_svo_bands.py.
+NBANDS = 24
+
 # DOS energy window
 NEDOS = 3001
 

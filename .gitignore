@@ -14,11 +14,14 @@ DOSCAR
 EIGENVAL
 IBZKPT
 LOCPROJ
+LOCPROJ_OPT
 OSZICAR
 OUTCAR
 PCDAT
 PROCAR
+PROCAR_OPT
 PROJCAR
+PROJCAR_OPT
 REPORT
 STOPCAR
 WAVECAR
@@ -33,9 +36,9 @@ wannier90.win
 *.nnkp
 
 # Generated VASP converter test artifacts (regenerated from vaspout.h5 at test time)
-test/python/vasp/converter/*.ctrl
-test/python/vasp/converter/*.pg[0-9]
-test/python/vasp/converter/*.test.h5
+test/python/vasp/converter/**/*.ctrl
+test/python/vasp/converter/**/*.pg[0-9]
+test/python/vasp/converter/**/*.test.h5
 # DMFT driver run artifacts
 checkpoint.h5
 log
