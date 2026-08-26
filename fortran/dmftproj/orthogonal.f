@@ -156,7 +156,7 @@ C ------------------------------------------------------
          STOP
         ENDIF       
 C W contains the eigenvalues of cmat.
-        W_comp=CMPLX(W,0d0)
+        W_comp=DCMPLX(W,0d0)
 C 
 C Checking of the validity of the computation :
 C ---------------------------------------------
