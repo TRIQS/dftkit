@@ -106,8 +106,6 @@ include(GNUInstallDirs)
 # Find / Build dependencies
 add_subdirectory(deps)
 
-# Build and install the dmftproj executable
-add_subdirectory(fortran/dmftproj)
 
 # Tests
 if(Build_Tests)
