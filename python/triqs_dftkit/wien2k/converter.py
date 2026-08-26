@@ -279,7 +279,8 @@ class Converter(ConverterTools):
         # Symmetries are used, so now convert symmetry information for
         # *correlated* orbitals:
         self.convert_symmetry_input(orbits=self.corr_shells, symm_file=self.symmcorr_file,
-                                    symm_subgrp=self.symmcorr_subgrp, SO=self.SO, SP=self.SP)
+                                    symm_subgrp=self.symmcorr_subgrp, SO=self.SO, SP=self.SP,
+                                    rot_mat=rot_mat)
         self.convert_misc_input()
 
     def convert_parproj_input(self):
@@ -385,7 +386,8 @@ class Converter(ConverterTools):
         # Symmetries are used, so now convert symmetry information for *all*
         # orbitals:
         self.convert_symmetry_input(orbits=self.shells, symm_file=self.symmpar_file,
-                                    symm_subgrp=self.symmpar_subgrp, SO=self.SO, SP=self.SP)
+                                    symm_subgrp=self.symmpar_subgrp, SO=self.SO, SP=self.SP,
+                                    rot_mat=rot_mat_all)
 
     def convert_bands_input(self):
         """
@@ -720,7 +722,7 @@ class Converter(ConverterTools):
             for it in things_to_save:
                 ar[self.transp_subgrp][it] = locals()[it]
 
-    def convert_symmetry_input(self, orbits, symm_file, symm_subgrp, SO, SP):
+    def convert_symmetry_input(self, orbits, symm_file, symm_subgrp, SO, SP, rot_mat=None):
         """
         Reads and stores symmetrisation data from symm_file, which can be is case.sympar or case.symqmc.
 
@@ -738,6 +740,10 @@ class Converter(ConverterTools):
              Is spin-orbit coupling considered?
         SP : integer
              Is the system spin-polarised?
+        rot_mat : list of ndarray, optional
+                  The local-frame rotation per orbit (rot_mat / rot_mat_all). When
+                  given, the symmetry matrices are rotated into that local solver
+                  frame; see the note below.
 
         """
 
@@ -798,6 +804,27 @@ class Converter(ConverterTools):
 
         R.close()
         # Reading done!
+
+        # dft_tools #148: the symmetry matrices read above relate the equivalent
+        # atoms in the global frame, but Symmetry.symmetrize applies them to the
+        # impurity quantity, which lives in the rot_mat-equalized local solver
+        # frame. Rotate them into that frame so the symmetrisation is correct for
+        # non-centrosymmetric cells. It is a no-op for centrosymmetric ones,
+        # where rot_mat is trivial. For a time-inversion operation the quantity is
+        # conjugated, so the source-side rotation is conjugated to match.
+        if rot_mat is not None:
+            for i_symm in range(n_symm):
+                orb_map = []
+                for iorb in range(n_orbits):
+                    target = perm[i_symm][orbits[iorb]['atom'] - 1]
+                    orb_map.append(next(j for j in range(n_orbits)
+                                        if orbits[j]['atom'] == target
+                                        and orbits[j]['sort'] == orbits[iorb]['sort']))
+                for iorb in range(n_orbits):
+                    jorb = orb_map[iorb]
+                    src = rot_mat[iorb].conjugate() if time_inv[i_symm] else rot_mat[iorb]
+                    mat[i_symm][iorb] = numpy.dot(numpy.dot(
+                        rot_mat[jorb].conjugate().transpose(), mat[i_symm][iorb]), src)
 
         # Save it to the HDF:
         with HDFArchive(self.hdf_file, 'a') as ar:
