@@ -109,6 +109,9 @@ add_subdirectory(deps)
 # Build and install the dmftproj executable
 add_subdirectory(fortran/dmftproj)
 
+# Command line scripts (init_dmftpr generates dmftproj's input file)
+add_subdirectory(bin)
+
 # Tests
 if(Build_Tests)
   add_subdirectory(test)
