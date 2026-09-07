@@ -603,6 +603,17 @@ counting the k-points along the path.
        ``max(n_parproj)``, ``max(shells['dim'])``, ``max(n_orbitals)``]
      - As in ``dft_parproj_input``, along the path. Elk writes a dummy
        ``array([0])``.
+   * - ``kpts_labels``
+     - list of string
+     - Names of the high-symmetry points of the path (e.g. ``'GAMMA'``, ``'X'``),
+       for labelling the ticks of a band plot. Only written by Wien2k and VASP,
+       and only when the underlying DFT output provides the labels.
+   * - ``kpts_labels_idx``
+     - numpy.array.int, dim [``len(kpts_labels)``]
+     - Position of each entry of ``kpts_labels`` along the path, as a 0-based
+       index into the ``n_k`` k-points. Each converter validates these indices
+       as far as its own DFT output allows, so consumers should not rely on
+       them being sorted or in range without checking.
 
 .. note::
 

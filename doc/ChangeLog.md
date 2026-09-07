@@ -27,10 +27,13 @@ Find below an itemized list of changes in this release.
 * Add a VASP driver for charge self-consistent DFT+DMFT calculations
 * Add `KPOINTS_OPT` band conversion from `vaspout.h5`: when `LOCPROJ_OPT` data are available, the converter writes `dft_bands_input` for band/spectral workflows, applying the same PLO config settings (`EWINDOW`, `TRANSFORM`, `NORMALIZE`, and optional `EFERMI`) as the regular VASP conversion, and stores the high-symmetry k-path labels
 * Warn on misplaced or unknown tags in the PLOVASP configuration
+* Read VASP `ICHARG=5` miscellaneous input from `vaspout.h5`
 
 ### Wannier90
 * Add ABINIT support to `Wannier90Converter` for charge self-consistent calculations
-* Read VASP `ICHARG=5` miscellaneous input from `vaspout.h5`
+
+### Wien2k
+* Read the high-symmetry k-path labels from the end of `case.outband` and store them as `kpts_labels` / `kpts_labels_idx` in `dft_bands_input`, matching the VASP band conversion
 
 ### Fix
 * Fix a bug in the `deltaN` write for the Quantum Espresso and Abinit interfaces
