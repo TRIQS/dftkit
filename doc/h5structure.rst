@@ -611,7 +611,9 @@ counting the k-points along the path.
    * - ``kpts_labels_idx``
      - numpy.array.int, dim [``len(kpts_labels)``]
      - Position of each entry of ``kpts_labels`` along the path, as a 0-based
-       index into the ``n_k`` k-points.
+       index into the ``n_k`` k-points. Each converter validates these indices
+       as far as its own DFT output allows, so consumers should not rely on
+       them being sorted or in range without checking.
 
 .. note::
 
