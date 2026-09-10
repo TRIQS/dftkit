@@ -591,6 +591,18 @@ class Driver(object):
                 # mix against that inherited history.
                 self._flush_mixing_history(
                     "case.scf records DMFT charge updates from an earlier run")
+                # run_update_stage ends with mixer, lapw0, lapw1, so an
+                # interrupted one can leave case.vector belonging to the
+                # pre-update potential while case.clmsum is already the
+                # post-update density.  The projectors built from that vector
+                # would then be inconsistent with the density on disk, silently.
+                # Redoing lapw0 and lapw1 is cheap next to one solver call.
+                self._report("redoing lapw0 and lapw1 so the eigenvectors match "
+                             "the density left by the interrupted run")
+                self._save_old(_LAPW0_SAVE)
+                self._run_x('lapw0')
+                self._run_x('lapw1')
+                mpi.barrier(poll_msec=100)
             return history
 
         if force_scf or not history:
