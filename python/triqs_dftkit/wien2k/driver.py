@@ -502,14 +502,19 @@ class Driver(object):
         Apply testconv's criterion to the (ene, dis) history.
 
         The energy test is the mean of the last two |dE| over three iterations,
-        not a single difference, and needs three points before it can fire.
+        not a single difference, and needs three points. 
+
+        A newest record with no :DIS counts as not converged.  mixer omits :DIS
+        only when it had no case.clmsum_old to compare against, which makes that
+        cycle's mixing meaningless (see _read_scfm) -- so there is no case in
+        which the absence of the line should let the SCF stop or be reused.
         """
         if len(history) < 3:
             return False
         e3, e2, e1 = (entry[0] for entry in history[-3:])
         ene_ok = 0.5 * (abs(e1 - e3) + abs(e1 - e2)) < self.ecut
         dis = history[-1][1]
-        dis_ok = dis is None or dis < self.ccut
+        dis_ok = dis is not None and dis < self.ccut
         return ene_ok and dis_ok
 
     def _prepare_fresh_scf(self):
