@@ -669,12 +669,12 @@ class Driver(object):
         if n_iter is None:
             return self._ensure_converged_scf(force_scf)
 
-        # Stepping: prepare only on a genuine cold start, so that repeated
-        # single-step calls keep their mixing history and their :ENE record.
-        if not self._scf_history_on_disk():
+        history = self._scf_history_on_disk() if mpi.is_master_node() else None
+        history = mpi.bcast(history)
+        if not history:
             self._prepare_fresh_scf()
             mpi.barrier(poll_msec=100)
-        return self._run_scf(n_iter=n_iter)
+        return self._run_scf(n_iter=n_iter, history=history)
 
     def _scf_history_on_disk(self):
         """
