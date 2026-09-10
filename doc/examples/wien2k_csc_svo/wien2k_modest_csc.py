@@ -60,6 +60,10 @@ def dmft_cycle(obe, target_density, Sigma_imp_dyn, Sigma_imp_hf, Sigma_dc, n_loo
         impurity interaction energy minus the DC energy in eV, and the
         band-basis charge density correction N_k[k, sigma, nu, nu'].
     """
+    if n_loops < 1:
+        raise ValueError("n_loops must be at least 1: the double counting, Eint-Edc "
+                         "and N_k below are all built from the impurity solution")
+
     epsilon_d = E.extract(tm.impurity_levels(obe))[0]
 
     for n in range(n_loops):
