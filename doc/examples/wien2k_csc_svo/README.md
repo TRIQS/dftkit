@@ -73,6 +73,10 @@ window.
 `lapw2 -qdmft` runs serially regardless of how the rest of the calculation is
 parallelised. The impurity solver still uses all available ranks.
 
+The entire Wien2k chain runs on the master rank alone. Typically, the job size
+is determined by the impurity solver, as we expect the DFT part to take a small
+wall time.
+
 The driver takes a `verbosity` argument: `1` (the default) prints one line per SCF
 cycle, `2` adds one line per Wien2k program launched, and `0` leaves only warnings.
 Warnings ignore the setting and go to stderr, so quietening the progress output
