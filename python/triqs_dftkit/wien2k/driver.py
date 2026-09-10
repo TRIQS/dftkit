@@ -266,18 +266,31 @@ class Driver(object):
         with open(self._f('scf'), 'a') as out:
             out.write(f"\n{_DMFT_MARKER}\n\n")
 
+    def _remove_broyden_files(self):
+        """
+        Delete case.broyd*, which is how run_lapw discards a mixing history.
+
+        run_lapw removes them whenever it starts an SCF rather than continuing
+        one, unless -NI is given.  Deleting the files is unambiguous: mixer
+        rebuilds the history from scratch because there is nothing to read.
+        """
+        prefix = self._f('broyd')
+        for name in os.listdir('.'):
+            if name.startswith(prefix):
+                os.remove(name)
+
     def _run_mixer(self):
         """
         Run mixer, first flushing the mixing history if this process inherited one.
 
         The flush is deferred to here rather than done where it is decided, so
-        that ``.restart`` is only ever written immediately before the mixer call
-        that consumes it.  Writing it earlier would leave a file that some later,
-        unrelated mixer call would pick up and act on.
+        that case.broyd* is only ever removed immediately before the mixer call
+        that would otherwise have read it, leaving the history in place for every
+        other mixer call in the run.
         """
         if self._mixing_flush_pending:
             if mpi.is_master_node():
-                open('.restart', 'w').close()
+                self._remove_broyden_files()
             self._mixing_flush_pending = False
             mpi.barrier(poll_msec=100)
         self._run_x('mixer')
@@ -292,8 +305,8 @@ class Driver(object):
         a DMFT-corrected one, or one from an interrupted run -- mixes the current
         residual into predictions derived from unrelated ones.
         """
-        self._warn(f"{reason}; flushing the Broyden mixing history via .restart, "
-                   "so the next mixer call restarts its mixing with a reduced DMIX")
+        self._warn(f"{reason}; removing case.broyd* as run_lapw does, so the next "
+                   "mixer call rebuilds its mixing history from scratch")
         self._mixing_flush_pending = True
 
     def _append_to_scf(self, parts):
@@ -501,9 +514,7 @@ class Driver(object):
         if not mpi.is_master_node():
             return
         self._set_in2_mode('TOT')
-        for name in os.listdir('.'):
-            if '.broyd' in name:
-                os.remove(name)
+        self._remove_broyden_files()
         # Truncate case.scf too.  Without this the abandoned cycles stay on disk
         # and _scf_history_on_disk splices them onto the new ones, so a later
         # restart applies the convergence test across the seam between two
