@@ -39,6 +39,7 @@ class DFTWorkflowError(Exception):
 # undefined variable, so the environment cannot simply be stripped to the
 # defaults the other drivers use.
 _DEFAULT_ENV_VARS = ['PATH', 'LD_LIBRARY_PATH', 'SHELL', 'PWD', 'HOME', 'OMP_NUM_THREADS',
+                     'OMP_STACKSIZE', 'MKL_NUM_THREADS', 'LANG', 'LC_ALL',
                      'OMPI_MCA_btl_vader_single_copy_mechanism', 'WIENROOT', 'SCRATCH']
 
 # WIEN2k works in Rydberg, TRIQS in eV.
@@ -447,6 +448,12 @@ class Driver(object):
         """
         if not mpi.is_master_node():
             return
+        if not os.getenv('SCRATCH'):
+            self._warn("SCRATCH is not set; x is a tcsh script and older WIEN2k "
+                       "versions dereference $SCRATCH unguarded, which aborts with "
+                       "an error this driver cannot attribute.  siteconfig normally "
+                       "sets it to ./")
+
         # x takes the case name from the directory it runs in, while this driver
         # takes it from seedname.  If the two disagree, x reads and writes a
         # different set of case.* files than the driver looks at.
@@ -568,8 +575,10 @@ class Driver(object):
 
         if n_iter is None:
             raise DFTWorkflowError(
-                f"SCF did not converge in {self.max_scf_iter} cycles "
-                f"(ecut={self.ecut} Ry, ccut={self.ccut})")
+                f"SCF did not converge in the {limit} cycles run here "
+                f"({done + limit} in case.scf in total; ecut={self.ecut} Ry, "
+                f"ccut={self.ccut}); raise max_scf_iter and rerun to continue from "
+                "where this stopped")
         return history
 
     def _ensure_converged_scf(self, force_scf=False):
@@ -692,11 +701,14 @@ class Driver(object):
         """
         Read case.oubwin, written by dmftproj.
 
-        Returns ``(iso, windows)`` where windows is a list of
-        ``(included, nb_bot, nb_top, weight)``, one per k-point, with 1-based
-        inclusive band indices.  This file -- not dft_input/n_orbitals -- is what
-        lapw2 -qdmft cross-checks case.qdmft against, so it is the authority on
-        the per-k window.
+        Returns the windows as a list of ``(included, nb_bot, nb_top, weight)``,
+        one per k-point, with 1-based inclusive band indices.  This file -- not
+        dft_input/n_orbitals -- is what lapw2 -qdmft cross-checks case.qdmft
+        against, so it is the authority on the per-k window.
+
+        The SO flag on the second record is read to advance past it and then
+        dropped: the converter already asserts it against case.ctqmcout, and
+        nothing here has any use for it.
         """
         path = self._f('oubwin')
         if not os.path.isfile(path):
@@ -704,7 +716,8 @@ class Driver(object):
         reader = ConverterTools.read_fortran_file(self, path, self.fortran_to_replace)
         try:
             n_k = int(next(reader))
-            iso = int(next(reader))
+            next(reader)                                     # the SO flag
+
             windows = []
             for _ in range(n_k):
                 included = int(next(reader))
@@ -716,7 +729,7 @@ class Driver(object):
                     windows.append((included, None, None, None))
         except StopIteration:
             raise DFTWorkflowError(f"wien2k: reading file {path} failed!")
-        return iso, windows
+        return windows
 
     def _write_qdmft(self, N_k, Eint_m_dc, mu=0.0, beta=0.0):
         """
@@ -730,7 +743,7 @@ class Driver(object):
                 nn                   must equal nb_top - nb_bot + 1
                 nn records of 2*nn reals: Re Im, one record per matrix *row*
                 one throwaway record
-            correner                 in eV; lapw2 divides it by 13.605698
+            correner                 in eV; lapw2 divides it by _RY_IN_EV
 
         Three conventions differ from the VASP and QE writers:
 
@@ -742,11 +755,21 @@ class Driver(object):
 
         The blank line after each matrix is mandatory: the reader issues a
         ``READ(32,*)`` with an empty io-list, which consumes one whole record.
+
+        ``Eint_m_dc`` is written as given and must therefore already be the value
+        for the whole cell: summed over the inequivalent correlated shells, each
+        multiplied by the multiplicity of its equivalent atoms.  That is the
+        caller's responsibility.
+
+        The per-k window comes from case.oubwin while ``N_k`` is indexed by the
+        archive's n_orbitals, so the two must agree.  They do by construction:
+        _regenerate_projectors is the only producer of either, and it runs
+        dmftproj and the converter together.
         """
         if not mpi.is_master_node():
             return
 
-        _, windows = self._read_oubwin()
+        windows = self._read_oubwin()
         if len(windows) != N_k.shape[0]:
             raise DFTWorkflowError(
                 f"case.oubwin has {len(windows)} k-points but N_k has {N_k.shape[0]}")
@@ -859,10 +882,7 @@ class Driver(object):
 
         if mpi.is_master_node() and os.path.isfile('fort.77'):
             os.remove('fort.77')
-        # Four decimals, not the full float repr: a single charge update carries
-        # the solver's statistical error through N_k, so consecutive updates
-        # scatter by a few meV even after the density has settled.  Printing 17
-        # significant digits advertises a precision the number does not have.
-        self._report(f"DFT + DMFT Total Energy: {self.read_dft_energy():.4f} eV")
+        self._report(f"DFT + DMFT total energy after the charge update: "
+                     f"{self.read_dft_energy():.4f} eV")
         mpi.barrier(poll_msec=100)
         return 0
