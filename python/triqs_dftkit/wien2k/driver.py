@@ -15,8 +15,7 @@ WIEN2k's own QDMFT support cannot be reused because it inverts the control flow
 -- ``run_lapw`` calls out to a user python script from inside its cycle, whereas
 DftDriver requires python to be the caller.
 
-Scope: serial, non-magnetic (SP=0, SO=0).  ``lapw2 -qdmft`` cannot be run in
-parallel at all.
+Scope: serial, non-magnetic (SP=0, SO=0).  TODO: SOC and SP support will be added in the future
 """
 import os, re, shutil, subprocess
 from datetime import datetime
@@ -35,14 +34,13 @@ class DFTWorkflowError(Exception):
 
 # Default environment variables to preserve for subprocess execution.  WIENROOT
 # and SCRATCH are WIEN2k specific: x interpolates $WIENROOT into every .def file
-# it writes (e.g. the xc_funcs.h path for lapw0) and tcsh aborts outright on an
-# undefined variable, so the environment cannot simply be stripped to the
-# defaults the other drivers use.
+# and tcsh aborts outright on an undefined variable, so the environment cannot simply 
+# be stripped to the defaults the other drivers use.
 _DEFAULT_ENV_VARS = ['PATH', 'LD_LIBRARY_PATH', 'SHELL', 'PWD', 'HOME', 'OMP_NUM_THREADS',
                      'OMP_STACKSIZE', 'MKL_NUM_THREADS', 'LANG', 'LC_ALL',
                      'OMPI_MCA_btl_vader_single_copy_mechanism', 'WIENROOT', 'SCRATCH']
 
-# WIEN2k works in Rydberg, TRIQS in eV.
+# WIEN2k works in Rydberg, TRIQS in eV.  
 _RY_IN_EV = 13.605698
 
 # Flags that make x rewrite the first five characters of case.in2 in place and
@@ -56,7 +54,6 @@ _CMPLX_PROGRAMS = ('lapw1', 'lapw2')
 
 # Files saved to <name>_old before lapw0 and before mixer as run_lapw.
 # case.clmsum_old is mixer's previous-iteration density
-# on unit 10, so the second set is required for mixing to work at all.
 _LAPW0_SAVE = ('vsp', 'vns', 'r2v')
 _MIXER_SAVE = ('clmsum', 'vrespsum', 'tausum')
 
@@ -201,12 +198,6 @@ class Driver(object):
     def _run_x(self, program, *flags):
         """
         Run ``x <program> <flags>`` and verify it succeeded.  Master node only.
-
-        Success is checked twice, because WIEN2k signals failure two ways: x
-        exits 9 when the program returns non-zero, and every program writes a
-        message into ``<program>.error`` on entry and truncates it again just
-        before a successful exit.  The error file therefore reports failures
-        that never reach the exit status, including untrapped runtime errors.
         """
         if not mpi.is_master_node():
             return 0
@@ -230,12 +221,6 @@ class Driver(object):
     def _run_checked(self, command, error_file, label):
         """
         Run a WIEN2k command and verify it succeeded.
-
-        Success is checked twice, because WIEN2k signals failure two ways: a
-        non-zero exit status, and a message left in the .error file.  Every program
-        writes that message on entry and truncates it again just before a
-        successful exit, so it catches failures that never reach the exit status,
-        including untrapped runtime errors.
         """
         self._report(f"[{datetime.now()}] running {' '.join(command)}", level=2)
         result = subprocess.run(command, capture_output=True, text=True, env=self._env())
@@ -362,14 +347,6 @@ class Driver(object):
         carries two numbers; the one inside the parentheses is the per-atom
         maximum, which is what testconv compares against the -cc limit, and the
         trailing one is the cell total.
-
-        Pairing is done by record rather than by zipping two independent lists.
-        mixer writes :DIS only inside, i.e. only when it could read case.clmsum_old, 
-        but writes :ENE unconditionally, so a cycle with no previous density contributes 
-        an :ENE with no :DIS.  Zipping and padding the shorter list at the end would attribute
-        every later :DIS to the cycle before its own and leave the newest cycle
-        with ``dis=None``, which silently disables the charge convergence test.
-        Within one record :DIS precedes :ENE, so :ENE closes the record.
 
         ``stop_at_dmft`` stops at the first _DMFT_MARKER, leaving the caller only
         the plain-DFT part of the history.
@@ -688,10 +665,6 @@ class Driver(object):
     def _scf_history_on_disk(self):
         """
         (ene, dis) pairs recovered from an existing case.scf, for restart.
-
-        Stops at the first DMFT marker: the cycles after it were produced by
-        run_update_stage against a DMFT-corrected density, and the DFT ecut/ccut
-        limits say nothing useful about them.
         """
         return self._scf_tags(self._f('scf'), stop_at_dmft=True)
 
