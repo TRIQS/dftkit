@@ -48,6 +48,11 @@ _RY_IN_EV = 13.605698
 # restore the original from .oldin2 afterwards.
 _IN2_MODE_FLAGS = ('-almd', '-qdmft', '-fermi', '-qtl', '-alm', '-efg')
 
+# Programs that run_lapw calls with -c on a complex (no inversion symmetry) case,
+# which makes x launch lapw1c/lapw2c and read case.in1c/case.in2c.  lapw0, lcore
+# and mixer have no complex variant and reject the flag.
+_CMPLX_PROGRAMS = ('lapw1', 'lapw2')
+
 # Files saved to <name>_old before lapw0 and before mixer as run_lapw.
 # case.clmsum_old is mixer's previous-iteration density
 # on unit 10, so the second set is required for mixing to work at all.
@@ -204,6 +209,10 @@ class Driver(object):
         """
         if not mpi.is_master_node():
             return 0
+
+        # x does not detect a complex case on its own; run_lapw passes -c.
+        if self._cmplx and program in _CMPLX_PROGRAMS:
+            flags = ('-c',) + flags
 
         # x backs case.in2 up to .oldin2 only when that file is absent, and
         # -qdmft seds .oldin2 rather than case.in2 -- so a .oldin2 left behind by
