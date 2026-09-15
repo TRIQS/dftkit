@@ -15,7 +15,8 @@ WIEN2k's own QDMFT support cannot be reused because it inverts the control flow
 -- ``run_lapw`` calls out to a user python script from inside its cycle, whereas
 DftDriver requires python to be the caller.
 
-Scope: serial, non-magnetic (SP=0, SO=0).  TODO: SOC and SP support will be added in the future
+Scope: serial, non-magnetic (SP=0, SO=0).  ``lapw2 -qdmft`` cannot be run in
+parallel at all.  TODO: SOC and SP support will be added in the future
 """
 import os, re, shutil, subprocess
 from datetime import datetime
@@ -34,13 +35,13 @@ class DFTWorkflowError(Exception):
 
 # Default environment variables to preserve for subprocess execution.  WIENROOT
 # and SCRATCH are WIEN2k specific: x interpolates $WIENROOT into every .def file
-# and tcsh aborts outright on an undefined variable, so the environment cannot simply 
+# and tcsh aborts outright on an undefined variable, so the environment cannot simply
 # be stripped to the defaults the other drivers use.
 _DEFAULT_ENV_VARS = ['PATH', 'LD_LIBRARY_PATH', 'SHELL', 'PWD', 'HOME', 'OMP_NUM_THREADS',
                      'OMP_STACKSIZE', 'MKL_NUM_THREADS', 'LANG', 'LC_ALL',
                      'OMPI_MCA_btl_vader_single_copy_mechanism', 'WIENROOT', 'SCRATCH']
 
-# WIEN2k works in Rydberg, TRIQS in eV.  
+# WIEN2k works in Rydberg, TRIQS in eV.
 _RY_IN_EV = 13.605698
 
 # Flags that make x rewrite the first five characters of case.in2 in place and
@@ -54,6 +55,7 @@ _CMPLX_PROGRAMS = ('lapw1', 'lapw2')
 
 # Files saved to <name>_old before lapw0 and before mixer as run_lapw.
 # case.clmsum_old is mixer's previous-iteration density
+# on unit 10, so the second set is required for mixing to work at all.
 _LAPW0_SAVE = ('vsp', 'vns', 'r2v')
 _MIXER_SAVE = ('clmsum', 'vrespsum', 'tausum')
 
@@ -66,7 +68,7 @@ _SCF_PARTS = ('0', '1', 'so', '2', '1s', '2s', 'c')
 # tests against the -cc limit; the trailing number is the cell total.
 _DIS_RE = re.compile(r'\(\s*([-+0-9.EDed]+)\s+for atom')
 
-# DMFT label marker in the : LABEL style of run_lapw                     
+# DMFT label marker in the : LABEL style of run_lapw
 _DMFT_MARKER = ':QDMFT:  CHARGE DENSITY UPDATED FROM DMFT OCCUPATIONS'
 
 
@@ -198,6 +200,12 @@ class Driver(object):
     def _run_x(self, program, *flags):
         """
         Run ``x <program> <flags>`` and verify it succeeded.  Master node only.
+
+        Success is checked twice, because WIEN2k signals failure two ways: x
+        exits 9 when the program returns non-zero, and every program writes a
+        message into ``<program>.error`` on entry and truncates it again just
+        before a successful exit.  The error file therefore reports failures
+        that never reach the exit status, including untrapped runtime errors.
         """
         if not mpi.is_master_node():
             return 0
@@ -221,6 +229,12 @@ class Driver(object):
     def _run_checked(self, command, error_file, label):
         """
         Run a WIEN2k command and verify it succeeded.
+
+        Success is checked twice, because WIEN2k signals failure two ways: a
+        non-zero exit status, and a message left in the .error file.  Every program
+        writes that message on entry and truncates it again just before a
+        successful exit, so it catches failures that never reach the exit status,
+        including untrapped runtime errors.
         """
         self._report(f"[{datetime.now()}] running {' '.join(command)}", level=2)
         result = subprocess.run(command, capture_output=True, text=True, env=self._env())
@@ -326,8 +340,8 @@ class Driver(object):
 
         run_lapw does this at two points in every cycle and both are load
         bearing.  Most importantly mixer reads case.clmsum_old on unit 10 as the
-        previous-iteration density: without the copy it mixes against a missing 
-        or stale density, which emits no :DIS line and sends the SCF diverging until 
+        previous-iteration density: without the copy it mixes against a missing
+        or stale density, which emits no :DIS line and sends the SCF diverging until
         the linearisation energies go bad.
         """
         if not mpi.is_master_node():
@@ -347,6 +361,10 @@ class Driver(object):
         carries two numbers; the one inside the parentheses is the per-atom
         maximum, which is what testconv compares against the -cc limit, and the
         trailing one is the cell total.
+
+        Pair by record, not by zipping: mixer writes :ENE every cycle but :DIS
+        only when it had a previous density.  :DIS precedes :ENE, which closes
+        the record.
 
         ``stop_at_dmft`` stops at the first _DMFT_MARKER, leaving the caller only
         the plain-DFT part of the history.
@@ -486,7 +504,7 @@ class Driver(object):
         Apply testconv's criterion to the (ene, dis) history.
 
         The energy test is the mean of the last two |dE| over three iterations,
-        not a single difference, and needs three points. 
+        not a single difference, and needs three points.
 
         A newest record with no :DIS counts as not converged.  mixer omits :DIS
         only when it had no case.clmsum_old to compare against, which makes that
@@ -716,7 +734,7 @@ class Driver(object):
                 nn                   must equal nb_top - nb_bot + 1
                 nn records of 2*nn reals: Re Im, one record per matrix *row*
                 one throwaway record
-            correner                 in eV; lapw2 divides it by _RY_IN_EV
+            correner                 in eV; lapw2 divides it by 13.605698
 
         Three conventions differ from the VASP and QE writers:
 
