@@ -2,6 +2,14 @@
 
 # Changelog
 
+## Unstable
+
+Changes on the `unstable` branch that are not part of a release yet. Rename
+this section to the version number when the next release is cut.
+
+### test
+* Check that the Wannier and Bloch basis conversions of the same wannier90 run describe the same operator, by downfolding the Bloch Hamiltonian with the projectors and comparing with the Wannier one, `P(k) H(k) P(k)^dag = H_W(k)`. `h5diff` only compares each archive with its own frozen reference and cannot catch an error present in both modes
+
 ## Version 4.0.0
 
 dftkit version 4.0.0 is the first release of the toolkit and is compatible with
