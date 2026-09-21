@@ -7,6 +7,9 @@
 Changes on the `unstable` branch that are not part of a release yet. Rename
 this section to the version number when the next release is cut.
 
+### VASP
+* Add `KPOINTS_OPT` band conversion from `vaspout.h5`: when `LOCPROJ_OPT` data are available, the converter writes `dft_bands_input` for band/spectral workflows, applying the same PLO config settings (`EWINDOW`, `TRANSFORM`, `NORMALIZE`, and optional `EFERMI`) as the regular VASP conversion, and stores the high-symmetry k-path labels
+
 ### test
 * Check that the Wannier and Bloch basis conversions of the same wannier90 run describe the same operator, by downfolding the Bloch Hamiltonian with the projectors and comparing with the Wannier one, `P(k) H(k) P(k)^dag = H_W(k)`. `h5diff` only compares each archive with its own frozen reference and cannot catch an error present in both modes
 
@@ -33,7 +36,6 @@ Find below an itemized list of changes in this release.
 
 ### VASP
 * Add a VASP driver for charge self-consistent DFT+DMFT calculations
-* Add `KPOINTS_OPT` band conversion from `vaspout.h5`: when `LOCPROJ_OPT` data are available, the converter writes `dft_bands_input` for band/spectral workflows, applying the same PLO config settings (`EWINDOW`, `TRANSFORM`, `NORMALIZE`, and optional `EFERMI`) as the regular VASP conversion, and stores the high-symmetry k-path labels
 * Warn on misplaced or unknown tags in the PLOVASP configuration
 
 ### Wannier90
