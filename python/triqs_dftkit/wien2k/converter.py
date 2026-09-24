@@ -30,6 +30,91 @@ from ..converter_tools import *
 import os.path
 
 
+def _parse_kpath_label_line(line):
+    """
+    Parse one line of the high-symmetry point block that dmftproj appends to
+    case.outband. The format is the fixed Fortran (2i6,a): columns 1-6 hold a
+    running counter, columns 7-12 the 1-based position of the point along the
+    band path, and columns 13 onwards the label.
+
+    Returns (counter, pos, label), or None if the line does not have that form.
+    """
+    line = line.rstrip('\n')
+    if len(line) < 13:
+        return None
+    try:
+        counter = int(line[0:6])
+        pos = int(line[6:12])
+    except ValueError:
+        return None
+    label = line[12:].strip()
+    if not label:
+        return None
+    return counter, pos, label
+
+
+def _read_kpath_labels(band_file, n_k):
+    """
+    Read the high-symmetry k-path labels appended to the end of case.outband
+    and map them onto the flattened band k-point index.
+
+    dmftproj writes one line per high-symmetry point after the projector data,
+    in fixed Fortran format (2i6,a), e.g.
+
+            1     1GAMMA
+            2   122X
+
+    Returns (labels, idx) where labels is a list of label strings and idx is a
+    0-based numpy int array giving, for each label, the position of that
+    high-symmetry point in the n_k band path. Returns (None, None) if no label
+    block is present or if the block is incomplete.
+    """
+    # The block is a handful of lines at the very end of a file that holds all
+    # the projectors, so read the tail rather than the whole file.
+    n_bytes = 8192
+    with open(band_file, 'rb') as R:
+        R.seek(0, os.SEEK_END)
+        size = R.tell()
+        R.seek(max(0, size - n_bytes))
+        lines = R.read().decode('utf-8', 'replace').splitlines()
+    if size > n_bytes:
+        # the first line of the chunk is in general cut in the middle
+        lines = lines[1:]
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    # Walk backwards from the end of the file: the label block is the trailing
+    # run of (2i6,a) lines, and the counter of its first line is 1.
+    labels = []
+    idx = []
+    first_counter = None
+    for line in reversed(lines):
+        parsed = _parse_kpath_label_line(line)
+        if parsed is None:
+            break
+        first_counter, pos, label = parsed
+        labels.append(label)
+        idx.append(pos - 1)
+        if first_counter == 1:
+            break
+    labels.reverse()
+    idx.reverse()
+
+    if not labels:
+        return None, None
+
+    if first_counter != 1:
+        mpi.report("convert_bands_input : WARNING : the high-symmetry point block in %s does not start at counter 1, so it is truncated or corrupted; skipping k-path labels." % band_file)
+        return None, None
+
+    idx = numpy.array(idx, dtype=int)
+    if idx[0] < 0 or idx[-1] >= n_k or numpy.any(numpy.diff(idx) < 0):
+        mpi.report("convert_bands_input : WARNING : inconsistent high-symmetry point indices in %s; skipping k-path labels." % band_file)
+        return None, None
+
+    return labels, idx
+
+
 class Converter(ConverterTools):
     """
     Conversion from Wien2k output to an hdf5 file that can be used as input for the SumkDFT class.
@@ -483,6 +568,8 @@ class Converter(ConverterTools):
 
         # Reading done!
 
+        kpts_labels, kpts_labels_idx = _read_kpath_labels(self.band_file, n_k)
+
         # Save it to the HDF:
         with HDFArchive(self.hdf_file, 'a') as ar:
             if not (self.bands_subgrp in ar):
@@ -491,6 +578,9 @@ class Converter(ConverterTools):
             # created. If it exists, the data is overwritten!
             things_to_save = ['n_k', 'n_orbitals', 'proj_mat',
                           'hopping', 'n_parproj', 'proj_mat_all']
+            if kpts_labels is not None:
+                things_to_save += ['kpts_labels', 'kpts_labels_idx']
+                mpi.report("  Stored %i high-symmetry k-path labels: %s" % (len(kpts_labels), ', '.join(kpts_labels)))
             for it in things_to_save:
                 ar[self.bands_subgrp][it] = locals()[it]
 
