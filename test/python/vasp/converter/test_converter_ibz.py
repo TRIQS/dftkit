@@ -1,5 +1,6 @@
 
 import os
+import unittest.mock
 import numpy as np
 import rpath
 _rpath = os.path.dirname(rpath.__file__) + '/'
@@ -7,6 +8,7 @@ _rpath = os.path.dirname(rpath.__file__) + '/'
 from h5 import HDFArchive
 from triqs_dftkit.vasp.plovasp.converter import generate_and_output_as_text
 from triqs_dftkit.vasp import Converter
+from triqs_dftkit.vasp import symmetry
 import mytest
 
 
@@ -105,6 +107,65 @@ class TestConverterIBZ(mytest.MyTestCase):
         projectors are only symmetric to ~1e-5 here.
         """
         self.check_ibz('nio_afm', tol=1e-4)
+
+
+    def test_rotation_representation(self):
+        """D^l(R) is orthogonal and a representation, D(R1 R2) = D(R1) D(R2)."""
+        rng = np.random.default_rng(1)
+        def random_op():
+            q, r = np.linalg.qr(rng.normal(size=(3, 3)))
+            return q * np.sign(np.diag(r))       # random O(3) element, proper or improper
+        for l in symmetry.SUPPORTED_L:
+            for _ in range(5):
+                R1, R2 = random_op(), random_op()
+                D1, D2 = (symmetry.real_harmonic_rotation(R, l) for R in (R1, R2))
+                np.testing.assert_allclose(D1 @ D1.T, np.eye(2 * l + 1), atol=1e-12)
+                np.testing.assert_allclose(symmetry.real_harmonic_rotation(R1 @ R2, l), D1 @ D2, atol=1e-12)
+
+    def test_unsupported_shells(self):
+        """f shells and non-orthonormal transforms are refused."""
+        vasp_h5 = _rpath + 'svo/vaspout.h5'
+        f_shell = [{'atom': 2, 'sort': 2, 'l': 3, 'dim': 7, 'SO': 0, 'irep': 0}]
+        with self.assertRaises(NotImplementedError):
+            symmetry.build_symmcorr(vasp_h5, f_shell, [np.eye(7)], 0, 0)
+        d_shell = [{'atom': 2, 'sort': 2, 'l': 2, 'dim': 5, 'SO': 0, 'irep': 0}]
+        with self.assertRaises(RuntimeError):
+            symmetry.build_symmcorr(vasp_h5, d_shell, [2 * np.eye(5)], 0, 0)
+        with self.assertRaises(NotImplementedError):
+            symmetry.build_symmcorr(vasp_h5, d_shell, [np.eye(5)], 0, 1)
+
+    def check_fallback(self, name, cfg, **kwargs):
+        """use_ibz=None falls back to the full grid, use_ibz=True raises."""
+        generate_and_output_as_text(_rpath + cfg + '.cfg', _rpath + name + '/')
+        test_file = _rpath + cfg + '_fallback.test.h5'
+        if os.path.exists(test_file): os.remove(test_file)
+        converter = Converter(filename=_rpath + cfg, hdf_filename=test_file)
+        converter.convert_dft_input(vasp_h5=_rpath + name + '/vaspout.h5', **kwargs)
+        with HDFArchive(test_file, 'r') as ar:
+            self.assertEqual(ar['dft_input']['symm_op'], 0)
+            self.assertGreater(ar['dft_input']['n_k'], ar['dft_misc_input']['n_k_ibz'])
+        with self.assertRaises(RuntimeError):
+            Converter(filename=_rpath + cfg, hdf_filename=test_file).convert_dft_input(
+                use_ibz=True, vasp_h5=_rpath + name + '/vaspout.h5', **kwargs)
+
+    def test_fallback_missing_equivalent_atom(self):
+        """Only one of the two equivalent O is projected: no IBZ."""
+        self.check_fallback('nio_afm', 'nio_afm_one_o')
+
+    def test_fallback_wrong_operations(self):
+        """
+        Wrong d rotation matrices (z^2 and x^2-y^2 exchanged) pass all structural
+        checks but not the comparison with the full grid.
+        """
+        rotation = symmetry.real_harmonic_rotation
+        def wrong_rotation(R, l):
+            D = rotation(R, l)
+            if l == 2:
+                idx = [0, 1, 4, 3, 2]
+                D = D[np.ix_(idx, idx)]
+            return D
+        with unittest.mock.patch.object(symmetry, 'real_harmonic_rotation', wrong_rotation):
+            self.check_fallback('nio_afm', 'nio_afm')
 
 
 if __name__ == '__main__':

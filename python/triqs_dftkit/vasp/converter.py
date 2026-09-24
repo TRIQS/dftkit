@@ -138,7 +138,7 @@ class Converter(ConverterTools):
 
         return header, f_gen, fh
 
-    def convert_dft_input(self, use_ibz=None, vasp_h5=None):
+    def convert_dft_input(self, use_ibz=None, vasp_h5=None, ibz_tol=1e-3):
         """
         Reads the input files, and stores the data in the HDFfile.
 
@@ -152,12 +152,20 @@ class Converter(ConverterTools):
             instead of unfolding to the full k-grid. Requires the VASP symmetry
             data in ``vasp_h5``. If ``None`` (default) the IBZ path is enabled
             automatically whenever symmetry was used (n_k_ibz < n_k) and the
-            symmetry data is available and there is no spin-orbit coupling;
-            otherwise the converter falls back to the full grid. In text-based
-            mode (no vaspout.h5) a note is printed suggesting the h5 interface.
+            symmetry data is available, all correlated shells are supported
+            (l <= 2, symmetry-closed orbital set, orthonormal TRANSFORM, all
+            equivalent atoms projected), there is no spin-orbit coupling, and
+            the symmetrized IBZ sums reproduce the full grid (see ``ibz_tol``);
+            otherwise the converter falls back to the full grid with a note.
+            ``True`` raises instead of falling back. In text-based mode (no
+            vaspout.h5) a note is printed suggesting the h5 interface.
         vasp_h5 : string, optional
             Path to vaspout.h5 holding the k-point symmetry data. By default it
             is looked up next to the basename, as for the KPOINTS_OPT data.
+        ibz_tol : float, optional
+            Largest accepted deviation of the symmetrized IBZ occupation (and
+            local levels, in eV) of the correlated shells from the full-grid
+            ones. Default 1e-3.
         """
         energy_unit = 1.0 # VASP interface always uses eV
         k_dep_projection = 1
@@ -473,6 +481,18 @@ class Converter(ConverterTools):
                             "TRANSFORM), or run on the full grid (use_ibz=False).")
 
                 symm_data = _sym.build_symmcorr(vasp_h5, corr_shells, corr_transforms, SP, SO, sym=h5_sym)
+
+                # The symmetrized IBZ sums must reproduce the full grid, which
+                # is still at hand here, for the occupation and the local levels.
+                err_occ, err_hloc = _sym.symmetrization_error(symm_data, proj_mat, hopping, f_weights,
+                                                              bz_weights, n_orbitals, corr_shells)
+                mpi.report(f"  IBZ check: max deviation from the full grid {err_occ:.1e} "
+                           f"(occupation), {err_hloc:.1e} eV (local levels).")
+                if max(err_occ, err_hloc) > ibz_tol:
+                    raise RuntimeError(
+                        f"IBZ symmetrization: the symmetrized IBZ sums deviate from the full "
+                        f"grid by more than ibz_tol={ibz_tol:.0e}. Run on the full grid "
+                        "(use_ibz=False).")
             except (RuntimeError, NotImplementedError) as err:
                 if not auto_ibz: raise
                 mpi.report(f"  Note: {err}\n  Unfolding to the full k-grid instead.")
