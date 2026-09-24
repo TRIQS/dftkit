@@ -1,8 +1,8 @@
 """
-Wien2k converter for DFT+DMFT calculations
+Wien2k converter and driver for DFT+DMFT calculations
 """
 
 from .converter import Converter
-from .driver    import Driver
+from .driver    import Driver, DFTWorkflowError
 
-__all__ = ['Converter', 'Driver']
+__all__ = ['Converter', 'Driver', 'DFTWorkflowError']
