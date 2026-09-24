@@ -61,6 +61,9 @@ def _d_tensor_basis():
 
 _D_BASIS = _d_tensor_basis()
 
+# Angular momenta for which real_harmonic_rotation is implemented
+SUPPORTED_L = (0, 1, 2)
+
 
 def real_harmonic_rotation(R, l):
     """
@@ -72,13 +75,15 @@ def real_harmonic_rotation(R, l):
     R : (3, 3) array
         Cartesian point-group operation (proper or improper).
     l : int
-        Angular momentum (1 or 2 are implemented).
+        Angular momentum (0, 1 and 2 are implemented).
 
     Returns
     -------
     (2l+1, 2l+1) ndarray
         Orthogonal rotation matrix in the VASP real-harmonic basis.
     """
+    if l == 0:
+        return np.ones((1, 1))
     if l == 1:
         D = np.zeros((3, 3))
         for j, bj in enumerate(_P_BASIS):
@@ -94,7 +99,7 @@ def real_harmonic_rotation(R, l):
                 D[i, j] = np.tensordot(Ti, RTjRt)
         return D
     raise NotImplementedError(
-        f"real_harmonic_rotation is only implemented for l = 1, 2 (got l = {l}). "
+        f"real_harmonic_rotation is only implemented for l = 0, 1, 2 (got l = {l}). "
         "Higher l (f electrons) needs the Wigner-D / rank-l tensor extension.")
 
 
@@ -306,6 +311,21 @@ def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO, sym=None):
     n_symm = len(R_cart)
     n_corr = len(corr_shells)
 
+    # Only shells with known real-harmonic rotation matrices, and transforms
+    # with orthonormal rows (otherwise T D T^dag is not unitary).
+    for ish, csh in enumerate(corr_shells):
+        if csh['l'] not in SUPPORTED_L:
+            raise NotImplementedError(
+                f"IBZ symmetrization: correlated shell {ish} (atom {csh.get('atom')}) has "
+                f"l={csh['l']}; the symmetry operations are only implemented for l = "
+                f"{', '.join(map(str, SUPPORTED_L))}. Run on the full grid (use_ibz=False).")
+        T = np.asarray(transforms[ish], dtype=complex)
+        if np.abs(T @ T.conj().T - np.eye(T.shape[0])).max() > 1e-8:
+            raise RuntimeError(
+                f"IBZ symmetrization: the TRANSFORM of correlated shell {ish} (atom "
+                f"{csh.get('atom')}) does not have orthonormal rows. Run on the full grid "
+                "(use_ibz=False).")
+
     # The projected operations Q = T D(R) T^dag form a representation of the
     # point group on the correlated orbitals only if the orbital subspace (the
     # row span of T) is invariant under every D(R). If it is not (e.g. an
@@ -386,3 +406,75 @@ def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO, sym=None):
     return dict(n_symm=n_symm, n_atoms=natom, perm=perm, orbits=orbits,
                 SO=SO, SP=SP, time_inv=time_inv, mat=mat, mat_tinv=mat_tinv,
                 n_k_ibz=sym['n_k_ibz'], ibz_weights=sym['ibz_weights'])
+
+
+# ---------------------------------------------------------------------------
+# Check of the symmetry operations against the full-grid data
+# ---------------------------------------------------------------------------
+def symmetrize_local(symm_data, local):
+    """
+    Symmetrize per-shell matrices ``local[icrsh][spin]`` (summed on the IBZ)
+    with the operations of ``symm_data``, following
+    triqs_dft_tools.symmetry.Symmetry, including how the image of a shell is
+    found (comparison of the whole orbit dict).
+    """
+    orbits = symm_data['orbits']
+    n_symm = symm_data['n_symm']
+    out = [np.zeros_like(x) for x in local]
+    for isym in range(n_symm):
+        for iorb, orb in enumerate(orbits):
+            jorb = orbits.index(dict(orb, atom=symm_data['perm'][isym][orb['atom'] - 1]))
+            mat = symm_data['mat'][isym][iorb]
+            out[jorb] += mat @ local[iorb] @ mat.conj().T / n_symm
+    return out
+
+
+def local_sums(proj_mat, hopping, f_weights, weights, n_orbitals, corr_shells, n_k):
+    """
+    Occupation sum_k w_k P f P^dag and local Hamiltonian sum_k w_k P H P^dag of
+    every correlated shell over the first ``n_k`` k-points, shape
+    (n_spin, dim, dim) per shell.
+    """
+    n_spin = proj_mat.shape[1]
+    occ, hloc = [], []
+    for icrsh, csh in enumerate(corr_shells):
+        dim = csh['dim']
+        o = np.zeros((n_spin, dim, dim), dtype=complex)
+        h = np.zeros((n_spin, dim, dim), dtype=complex)
+        for ik in range(n_k):
+            for isp in range(n_spin):
+                nb = n_orbitals[ik, isp]
+                P = proj_mat[ik, isp, icrsh, :dim, :nb]
+                o[isp] += weights[ik] * (P * f_weights[ik, isp, :nb]) @ P.conj().T
+                h[isp] += weights[ik] * P @ hopping[ik, isp, :nb, :nb] @ P.conj().T
+        occ.append(o)
+        hloc.append(h)
+    return occ, hloc
+
+
+def symmetrization_error(symm_data, proj_mat, hopping, f_weights, bz_weights, n_orbitals, corr_shells):
+    """
+    Largest deviation of the symmetrized IBZ sums from the full-grid sums of the
+    occupation and of the local Hamiltonian, for full-grid input arrays.
+
+    This checks the symmetry operations on the data themselves, independent of
+    how they were constructed: wrong rotations, permutations or weights show up
+    here. What remains for correct operations is the symmetry error of the VASP
+    projectors (~1e-4 for the NiO test data).
+
+    Returns
+    -------
+    (float, float)
+        Maximum absolute deviation of the occupation matrices and of the local
+        Hamiltonian (eV).
+    """
+    n_k_ibz = int(symm_data['n_k_ibz'])
+    occ_full, hloc_full = local_sums(proj_mat, hopping, f_weights, bz_weights, n_orbitals,
+                                     corr_shells, len(bz_weights))
+    occ_ibz, hloc_ibz = local_sums(proj_mat, hopping, f_weights, symm_data['ibz_weights'],
+                                   n_orbitals, corr_shells, n_k_ibz)
+    occ_ibz = symmetrize_local(symm_data, occ_ibz)
+    hloc_ibz = symmetrize_local(symm_data, hloc_ibz)
+    err_occ = max(np.abs(a - b).max() for a, b in zip(occ_ibz, occ_full))
+    err_hloc = max(np.abs(a - b).max() for a, b in zip(hloc_ibz, hloc_full))
+    return err_occ, err_hloc
