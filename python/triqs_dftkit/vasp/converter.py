@@ -138,7 +138,7 @@ class Converter(ConverterTools):
 
         return header, f_gen, fh
 
-    def convert_dft_input(self, use_ibz=None, vasp_h5='vaspout.h5', plo_cfg='plo.cfg'):
+    def convert_dft_input(self, use_ibz=None, vasp_h5=None):
         """
         Reads the input files, and stores the data in the HDFfile.
 
@@ -152,17 +152,12 @@ class Converter(ConverterTools):
             instead of unfolding to the full k-grid. Requires the VASP symmetry
             data in ``vasp_h5``. If ``None`` (default) the IBZ path is enabled
             automatically whenever symmetry was used (n_k_ibz < n_k) and the
-            symmetry data is available; otherwise the converter falls back to
-            the full grid. In text-based mode (no vaspout.h5) a warning is
-            printed suggesting the h5 interface.
+            symmetry data is available and there is no spin-orbit coupling;
+            otherwise the converter falls back to the full grid. In text-based
+            mode (no vaspout.h5) a note is printed suggesting the h5 interface.
         vasp_h5 : string, optional
-            Path to vaspout.h5 holding the k-point symmetry data. Default
-            'vaspout.h5'.
-        plo_cfg : string, optional
-            Deprecated and unused. The per-shell TRANSFORM matrices needed to
-            build the correlated-orbital symmetry operations are now read from
-            the PLOVASP output (the .pg header), so the PLO config is no longer
-            re-parsed here. Kept only for backward-compatible call signatures.
+            Path to vaspout.h5 holding the k-point symmetry data. By default it
+            is looked up next to the basename, as for the KPOINTS_OPT data.
         """
         energy_unit = 1.0 # VASP interface always uses eV
         k_dep_projection = 1
@@ -424,11 +419,17 @@ class Converter(ConverterTools):
         from . import symmetry as _sym
         symm_data = None
         sym_was_on = (n_k_ibz is not None) and (n_k_ibz < n_k)
+        if vasp_h5 is None:
+            vasp_h5 = next((c for c in self._vaspout_candidates() if os.path.exists(c)), 'vaspout.h5')
         h5_sym = _sym.read_vasp_symmetry(vasp_h5) if os.path.exists(vasp_h5) else None
         h5_available = h5_sym is not None
 
-        if use_ibz is None:
-            use_ibz = sym_was_on and h5_available
+        auto_ibz = use_ibz is None
+        if auto_ibz:
+            use_ibz = sym_was_on and h5_available and not SO
+            if sym_was_on and h5_available and SO:
+                mpi.report("  Note: IBZ symmetrization is not implemented with spin-orbit "
+                           "coupling; unfolding to the full k-grid.")
 
         if use_ibz and not h5_available:
             mpi.report("  WARNING: use_ibz requested but no VASP symmetry data found in "
@@ -442,33 +443,42 @@ class Converter(ConverterTools):
                        "full k-grid.")
 
         if use_ibz:
-            # Guard against under-determined correlated shells. If VASP emitted
-            # only a subset of the 2l+1 real harmonics (e.g. a partial LOCPROJ
-            # selection) without a TRANSFORM defining a proper subspace, the
-            # absent orbitals are zero-filled in proj_mat. Their symmetry
-            # partners are missing, so symmetrizing on the IBZ would leak the
-            # kept orbitals into the dead ones (the invariance guard cannot see
-            # this: an identity transform is trivially invariant). Detect and
-            # refuse before building the symmetry operations.
-            for icrsh, csh in enumerate(corr_shells):
-                dim = csh['dim']
-                orb_weight = numpy.max(numpy.abs(proj_mat[:, :, icrsh, :dim, :]),
-                                       axis=(0, 1, 3))            # (dim,)
-                scale = orb_weight.max()
-                dead = numpy.where(orb_weight <= max(1e-10, 1e-8 * scale))[0]
-                if scale > 0 and len(dead) > 0:
-                    raise RuntimeError(
-                        f"IBZ symmetrization: correlated shell {icrsh} (atom "
-                        f"{csh.get('atom')}, l={csh['l']}, dim={dim}) has zero-weight "
-                        f"projector orbital(s) {list(map(int, dead))}. This happens when "
-                        "only a subset of the 2l+1 real harmonics was projected (e.g. a "
-                        "partial LOCPROJ selection) without a TRANSFORM defining a "
-                        "symmetry-adapted subspace. The missing symmetry partners cannot "
-                        "be restored, so the k-sum cannot be symmetrized on the "
-                        "irreducible BZ. Project the full shell (or a complete irrep via "
-                        "TRANSFORM), or run on the full grid (use_ibz=False).")
+            # In auto mode a projector set that cannot be symmetrized falls back to
+            # the full grid, so that setups that worked before keep working.
+            try:
+                # Guard against under-determined correlated shells. If VASP emitted
+                # only a subset of the 2l+1 real harmonics (e.g. a partial LOCPROJ
+                # selection) without a TRANSFORM defining a proper subspace, the
+                # absent orbitals are zero-filled in proj_mat. Their symmetry
+                # partners are missing, so symmetrizing on the IBZ would leak the
+                # kept orbitals into the dead ones (the invariance guard cannot see
+                # this: an identity transform is trivially invariant). Detect and
+                # refuse before building the symmetry operations.
+                for icrsh, csh in enumerate(corr_shells):
+                    dim = csh['dim']
+                    orb_weight = numpy.max(numpy.abs(proj_mat[:, :, icrsh, :dim, :]),
+                                           axis=(0, 1, 3))            # (dim,)
+                    scale = orb_weight.max()
+                    dead = numpy.where(orb_weight <= max(1e-10, 1e-8 * scale))[0]
+                    if scale > 0 and len(dead) > 0:
+                        raise RuntimeError(
+                            f"IBZ symmetrization: correlated shell {icrsh} (atom "
+                            f"{csh.get('atom')}, l={csh['l']}, dim={dim}) has zero-weight "
+                            f"projector orbital(s) {list(map(int, dead))}. This happens when "
+                            "only a subset of the 2l+1 real harmonics was projected (e.g. a "
+                            "partial LOCPROJ selection) without a TRANSFORM defining a "
+                            "symmetry-adapted subspace. The missing symmetry partners cannot "
+                            "be restored, so the k-sum cannot be symmetrized on the "
+                            "irreducible BZ. Project the full shell (or a complete irrep via "
+                            "TRANSFORM), or run on the full grid (use_ibz=False).")
 
-            symm_data = _sym.build_symmcorr(vasp_h5, corr_shells, corr_transforms, SP, SO)
+                symm_data = _sym.build_symmcorr(vasp_h5, corr_shells, corr_transforms, SP, SO, sym=h5_sym)
+            except (RuntimeError, NotImplementedError) as err:
+                if not auto_ibz: raise
+                mpi.report(f"  Note: {err}\n  Unfolding to the full k-grid instead.")
+                use_ibz, symm_data = False, None
+
+        if use_ibz:
             nkibz = int(symm_data['n_k_ibz'])
             mpi.report(f"  IBZ mode: reducing {n_k} k-points to {nkibz} irreducible "
                        f"k-points with {symm_data['n_symm']} symmetry operations.")
@@ -519,12 +529,8 @@ class Converter(ConverterTools):
             self.convert_symmetry_input(ctrl_head, orbits=self.corr_shells, symm_subgrp=self.symmcorr_subgrp)
 
         # Auto-convert KPOINTS_OPT band/projector data when available.
-        vaspout_candidates = [
-            os.path.join(self.basename, 'vaspout.h5'),
-            os.path.join(os.path.dirname(self.basename), 'vaspout.h5')
-        ]
         kpoints_opt_found = False
-        for candidate in vaspout_candidates:
+        for candidate in self._vaspout_candidates():
             if not os.path.exists(candidate):
                 continue
             try:
@@ -793,10 +799,7 @@ class Converter(ConverterTools):
         n_spin_blocs = 1 if int(self.SO) == 1 else int(self.SP) + 1
 
         # Read KPOINTS_OPT data directly from vaspout.h5
-        vaspout_candidates = [
-            os.path.join(self.basename, 'vaspout.h5'),
-            os.path.join(os.path.dirname(self.basename), 'vaspout.h5')
-        ]
+        vaspout_candidates = self._vaspout_candidates()
         vaspout_h5 = None
         for candidate in vaspout_candidates:
             if os.path.exists(candidate):
@@ -974,6 +977,11 @@ class Converter(ConverterTools):
             if not (misc_subgrp in ar): ar.create_group(misc_subgrp)
             for it in things_to_save: ar[misc_subgrp][it] = locals()[it]
 
+
+    def _vaspout_candidates(self):
+        """Locations where vaspout.h5 is looked up, relative to the basename."""
+        return [os.path.join(self.basename, 'vaspout.h5'),
+                os.path.join(os.path.dirname(self.basename), 'vaspout.h5')]
 
     def write_symmetry_input(self, symm_data, symm_subgrp):
         """

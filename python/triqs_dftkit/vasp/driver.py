@@ -87,18 +87,24 @@ class Driver:
         VASP executable name (e.g., "vasp_std").
     mpi_handler : MPIHandler
         MPI configuration handler.
+    use_ibz : bool or None
+        Passed to Converter.convert_dft_input(): run on the irreducible BZ
+        with symmetrization. None (default) enables it whenever VASP used
+        symmetry and vaspout.h5 holds the symmetry data.
     """
 
     def __init__(self, seedname: str, plo_cfg: str, mpi_handler: MPIHandler,
-                 vasp_command: str = "vasp_std") -> None:
+                 vasp_command: str = "vasp_std", use_ibz: bool | None = None) -> None:
         self.seedname = seedname
         self.plo_cfg = plo_cfg
         self.vasp_command = vasp_command
         self.mpi_handler = mpi_handler
+        self.use_ibz = use_ibz
         self._vasp_process_id = None
 
     def __repr__(self):
-        return f"VaspDriver(seedname={self.seedname}, plo_cfg={self.plo_cfg}, vasp_command={self.vasp_command})"
+        return (f"VaspDriver(seedname={self.seedname}, plo_cfg={self.plo_cfg}, "
+                f"vasp_command={self.vasp_command}, use_ibz={self.use_ibz})")
 
     __str__ = __repr__
 
@@ -194,7 +200,7 @@ class Driver:
             generate_and_output_as_text(self.plo_cfg, vasp_dir='./')
 
             self.mpi_handler.report(f"[{datetime.now()}] Running VASP HDF5 converter")
-            Converter(filename=self.seedname).convert_dft_input()
+            Converter(filename=self.seedname).convert_dft_input(use_ibz=self.use_ibz)
 
         mpi.barrier(poll_msec=100)
 
