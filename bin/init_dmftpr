@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""
+Interactive generator for case.indmftpr, the input file of dmftproj.
+
+Ported from triqs_dft_tools (bin/init_dmftpr).  Reads case.struct for the atom
+species and multiplicities, asks what to project and how, and writes the file in
+the layout dmftproj expects.  WIEN2k ships a worked example at
+$WIENROOT/SRC_templates/case.indmftpr.
+
+Run it in the WIEN2k case directory, after init_lapw:
+
+    init_dmftpr
+
+Differences from the dft_tools original, all bug fixes:
+  * the energy window is always written.  Previously a third token that was not
+    exactly 'ev'/'eV'/'Ev' -- e.g. '-0.6 0.14 Ry', or 'EV' -- fell through the
+    unit test without writing anything, silently producing a case.indmftpr with
+    no window line at all.
+  * the struct file is taken as <case>.struct rather than the first *.struct
+    glob match, which could pick up a stray tmp.struct.
+  * orbital letters are validated instead of raising KeyError.
+  * python3 shebang, and installed with the execute bit set.
+"""
+import os
+import sys
+
+from numpy import array
+
+# Occupancy vectors, indexed s, p, d, f.  2 marks a correlated shell, 1 an
+# uncorrelated projector.
+ORBITALS = {"s": [1, 0, 0, 0],
+            "p": [0, 1, 0, 0],
+            "d": [0, 0, 1, 0],
+            "f": [0, 0, 0, 1]}
+CORR_ORBITALS = {"s": [2, 0, 0, 0],
+                 "p": [0, 2, 0, 0],
+                 "d": [0, 0, 2, 0],
+                 "f": [0, 0, 0, 2]}
+
+EV_PER_RY = 13.605698
+
+# dmftproj reads one lsort/lnreps entry per l from 0 to lmax.
+LMAX = 3
+
+
+def parse_orbitals(text, table):
+    """Sum the occupancy vectors for a string like 'spd'; None if any letter is bad."""
+    bad = [c for c in text if c not in table]
+    if bad:
+        print("Not an orbital: {}. Use s, p, d or f.".format(", ".join(sorted(set(bad)))))
+        return None
+    total = array([0, 0, 0, 0], dtype=int)
+    for c in text:
+        total += array(table[c], dtype=int)
+    return total
+
+
+def parse_window(text):
+    """
+    Turn a projection-window answer into the '<emin> <emax>' line, in Ry.
+
+    Accepts 'emin emax' (Ry) or 'emin emax <unit>' with unit ev/eV/Ry, case
+    insensitive.  Returns None if the window does not straddle the Fermi energy
+    or cannot be read, so the caller can re-prompt.
+    """
+    fields = text.split()
+    if len(fields) not in (2, 3):
+        print("Expected 'emin emax' or 'emin emax UNIT'.")
+        return None
+    try:
+        emin, emax = float(fields[0]), float(fields[1])
+    except ValueError:
+        print("Could not read '{}' as two numbers.".format(text))
+        return None
+    if not (emin < 0 < emax):
+        print("The energy window ({}) does not contain the Fermi energy!".format(text))
+        return None
+    unit = fields[2].lower() if len(fields) == 3 else "ry"
+    if unit == "ry":
+        return "{0:0.5f} {1:0.5f}".format(emin, emax)
+    if unit == "ev":
+        return "{0:0.5f} {1:0.5f}".format(emin / EV_PER_RY, emax / EV_PER_RY)
+    print("Unknown unit '{}'; use Ry or eV.".format(fields[2]))
+    return None
+
+
+def ask(prompt, allowed=None):
+    """Prompt until the answer is in `allowed` (or any non-empty answer if None)."""
+    while True:
+        answer = input(prompt)
+        if allowed is None or answer in allowed:
+            return answer
+        print("Did not recognize that input. Try again.")
+
+
+def collect_indmftpr(struct_file):
+    """
+    Ask the user what to project and return the case.indmftpr lines.
+
+    Returns a list of lines (no trailing newlines).  Nothing is written here, so
+    an abort part way through cannot leave a half-finished file on disk, and the
+    generated layout can be checked without driving stdin.
+    """
+    lines = []
+    struct = open(struct_file).readlines()
+    species = [line.split()[0] for line in struct if "NPT" in line]
+    mult = [line.split("=")[1].split()[0] for line in struct if "MULT" in line]
+    num_atoms = len(species)
+    if num_atoms == 0:
+        print("No atoms found in {} (no NPT lines).".format(struct_file))
+        sys.exit(1)
+
+    print("number of atoms = {} ({})\n".format(num_atoms, " ".join(species)))
+
+    lines.append(str(num_atoms))
+    lines.append(" ".join(mult))
+    lines.append(str(LMAX))
+
+    for atom in range(num_atoms):
+        label = "ATOM {} ({})".format(atom + 1, species[atom])
+
+        sph_harm = ask("What flavor of spherical harmonics do you want to use "
+                       "for {}? (cubic/complex/fromfile)\n".format(label),
+                       ["cubic", "complex", "fromfile"])
+        lines.append(sph_harm)
+        if sph_harm == "fromfile":
+            while True:
+                filename = input("name of file defining the basis?\n")
+                if not os.path.isfile(filename):
+                    print("{} could not be found in the current directory!".format(filename))
+                    continue
+                if len(filename) >= 25:      # dmftproj's field width
+                    rename = input("{} is too long! Rename the file to: \n".format(filename))
+                    os.rename(filename, rename)
+                    filename = rename
+                lines.append(filename)
+                break
+
+        if ask("Do you want to treat {} as correlated (y/n)?\n".format(label),
+               ["y", "n"]) == "y":
+            proj = ask("Specify the correlated orbital? (d,f)\n", ["d", "f"])
+            while True:
+                non_corr = input("projectors for non-correlated orbitals? "
+                                 "(type h for help, blank for none)\n")
+                if non_corr == "h":
+                    print("indicate orbital projectors using (s, p, d, or f). "
+                          "For multiple, combine them (sp, pd, spd, etc.)")
+                    continue
+                if proj in non_corr:
+                    print("Error: User can not choose orbital {} as both "
+                          "correlated and uncorrelated!".format(proj))
+                    continue
+                projectors = array(CORR_ORBITALS[proj], dtype=int)
+                if non_corr:
+                    extra = parse_orbitals(non_corr, ORBITALS)
+                    if extra is None:
+                        continue
+                    projectors = projectors + extra
+                lines.append(" ".join(map(str, projectors)))
+                break
+
+            irrep, to_write = None, ["0 0 0 0"]
+            if proj == "d":
+                irrep = ask("Split this orbital into it's irreps? (t2g/eg/n)\n",
+                            ["t2g", "eg", "n"])
+                if irrep == "t2g":
+                    to_write = ["0 0 2 0", "01"]
+                elif irrep == "eg":
+                    to_write = ["0 0 2 0", "10"]
+
+            if ask("Do you want to include soc? (y/n)\n", ["y", "n"]) == "y":
+                if proj == "d" and irrep in ("t2g", "eg"):
+                    print("Warning: For SOC, dmftproj will use the entire "
+                          "d-shell. Using entire d-shell!")
+                    lines.append("0 0 0 0")
+                else:
+                    lines.extend(to_write)
+                lines.append("1")
+            else:
+                lines.extend(to_write)
+                lines.append("0")
+
+        else:                                # uncorrelated: projectors only
+            while True:
+                proj = input("Specify the projectors that you would like to "
+                             "include? (type h for help)\n")
+                if proj == "h":
+                    print("indicate orbital projectors using (s, p, d, or f). "
+                          "For multiple, combine them (sp, pd, spd, etc.)")
+                    continue
+                projectors = parse_orbitals(proj, ORBITALS)
+                if projectors is None:
+                    continue
+                lines.append(" ".join(map(str, projectors)))
+                lines.append("0 0 0 0")
+                break
+
+    while True:
+        line = parse_window(input("Specify the projection window around eF "
+                                  "(default unit is Ry, specify eV with "
+                                  "-X.XX X.XX eV)\n"))
+        if line is not None:
+            lines.append(line)
+            break
+
+    return lines
+
+
+def main():
+    case = os.path.basename(os.getcwd())
+    struct_file = case + ".struct"
+    out_file = case + ".indmftpr"
+
+    if "-h" in sys.argv or "--help" in sys.argv:
+        print(__doc__)
+        return 0
+    if not os.path.isfile(struct_file):
+        print("Could not identify a {} file!".format(struct_file))
+        return 1
+    if os.path.isfile(out_file):
+        if ask("Previous {} detected! Continue? (y/n)\n".format(out_file),
+               ["y", "n"]) == "n":
+            return 0
+
+    print("Preparing dmftproj input file : {}\n".format(out_file))
+    lines = collect_indmftpr(struct_file)
+
+    # Written only once every answer is in, so an abort leaves the previous file
+    # (or no file) rather than a truncated one.
+    with open(out_file, "w") as out:
+        out.write('\n'.join(lines) + '\n')
+    print("initialize {} file ok!".format(out_file))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (KeyboardInterrupt, EOFError):
+        print("\naborted; no file written")
+        sys.exit(130)
