@@ -161,6 +161,7 @@ def read_vasp_symmetry(vasp_h5):
     Returns a dict with:
         n_k_ibz       : number of irreducible k-points
         ibz_weights   : (n_k_ibz,) IBZ k-point weights (sum to 1)
+        ksymmap       : (n_k,) index of the IBZ representative of each k-point
         R_cart        : list of unique Cartesian point-group operations (3x3)
         positions     : (natom, 3) fractional ion positions
         lattice       : (3, 3) Cartesian lattice vectors (rows)
@@ -178,6 +179,7 @@ def read_vasp_symmetry(vasp_h5):
         symop = np.asarray(ee['kpoints_symmetry_symop'])      # (nktot, 3, 3) int, reciprocal-fractional
         ibz_weights = np.asarray(ee['kpoints_symmetry_weight'])  # (nkibz,) sum = 1
         n_k_ibz = int(ee['kpoints']) if 'kpoints' in ee else len(ibz_weights)
+        ksymmap = np.asarray(ee['kpoints_symmetry_mapping']) - 1  # full grid -> IBZ index
         positions_grp = ar['results']['positions']
         lattice = np.asarray(positions_grp['lattice_vectors'])    # rows = Cartesian lattice vectors
         positions = np.asarray(positions_grp['position_ions'])    # (natom, 3) fractional
@@ -197,7 +199,7 @@ def read_vasp_symmetry(vasp_h5):
     uniq = _close_group(np.unique(symop.reshape(-1, 9), axis=0).reshape(-1, 3, 3))
     R_cart = [B @ s.astype(float) @ Binv for s in uniq]
 
-    return dict(n_k_ibz=n_k_ibz, ibz_weights=ibz_weights, R_cart=R_cart,
+    return dict(n_k_ibz=n_k_ibz, ibz_weights=ibz_weights, ksymmap=ksymmap, R_cart=R_cart,
                 positions=positions, lattice=lattice, type_of_ion=type_of_ion)
 
 
@@ -257,7 +259,7 @@ def atom_permutation(R_cart, positions, lattice, type_of_ion, tol=1e-4):
 # ---------------------------------------------------------------------------
 # Top-level: build the dft_symmcorr_input payload
 # ---------------------------------------------------------------------------
-def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO):
+def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO, sym=None):
     """
     Build the ``dft_symmcorr_input`` data for the correlated shells.
 
@@ -272,7 +274,10 @@ def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO):
         Per-correlated-shell transformation matrix T mapping the real harmonics
         onto the correlated orbitals (the PLO TRANSFORM). One per corr shell.
     SP, SO : int
-        Spin-polarization and spin-orbit flags.
+        Spin-polarization and spin-orbit flags. Spin-orbit coupling (SO = 1) is
+        not supported: the operations would have to act on the spinors too.
+    sym : dict, optional
+        Output of ``read_vasp_symmetry``, to avoid reading ``vasp_h5`` again.
 
     Returns
     -------
@@ -280,9 +285,22 @@ def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO):
     and additionally n_k_ibz, ibz_weights for the IBZ slicing.
     Returns ``None`` if no symmetry data is available.
     """
-    sym = read_vasp_symmetry(vasp_h5)
+    if SO:
+        raise NotImplementedError(
+            "IBZ symmetrization is not implemented with spin-orbit coupling (SO = 1): the "
+            "symmetry operations do not act on the spin. Run on the full grid (use_ibz=False).")
+
+    if sym is None:
+        sym = read_vasp_symmetry(vasp_h5)
     if sym is None:
         return None
+
+    # The converter recovers the IBZ data by slicing the first n_k_ibz points
+    # of the full grid, which requires them to be the IBZ representatives.
+    n_k_ibz = sym['n_k_ibz']
+    if not np.array_equal(sym['ksymmap'][:n_k_ibz], np.arange(n_k_ibz)):
+        raise RuntimeError("IBZ symmetrization: the first n_k_ibz points of the full k-grid in "
+                           "vaspout.h5 are not the irreducible k-points.")
 
     R_cart = sym['R_cart']
     n_symm = len(R_cart)
@@ -325,17 +343,46 @@ def build_symmcorr(vasp_h5, corr_shells, transforms, SP, SO):
     for R in R_cart:
         p = atom_permutation(R, sym['positions'], sym['lattice'], sym['type_of_ion'])
         if p is None:
-            # fall back to identity; correct whenever the correlated atoms are
-            # each left invariant by the point operations (warn and continue).
-            import triqs.utility.mpi as mpi
-            mpi.report("  WARNING: could not determine atom permutation for a symmetry op; "
-                       "assuming identity (valid only if correlated atoms are fixed).")
-            p = np.arange(1, natom + 1)
+            raise RuntimeError(
+                "IBZ symmetrization: could not determine the atom permutation of a VASP "
+                "symmetry operation. Run on the full grid (use_ibz=False).")
         perm.append(list(map(int, p)))
+
+    # Every symmetry image of a correlated shell must itself be a correlated
+    # shell (same l and dim), otherwise the star of the local quantity cannot be
+    # closed, e.g. when only one of two equivalent atoms is treated as correlated.
+    shell_key = {(csh['atom'], csh['l'], csh['dim']): ish for ish, csh in enumerate(corr_shells)}
+    for p in perm:
+        for csh in corr_shells:
+            if (p[csh['atom'] - 1], csh['l'], csh['dim']) not in shell_key:
+                raise RuntimeError(
+                    f"IBZ symmetrization: atom {csh['atom']} (l={csh['l']}) is mapped onto "
+                    f"atom {p[csh['atom'] - 1]} by a symmetry operation, but the latter is not "
+                    "a correlated shell with the same l and dim. Project all symmetry-equivalent "
+                    "atoms, or run on the full grid (use_ibz=False).")
+
+    # dft_tools' Symmetry finds the image of an orbit by comparing the whole
+    # orbit dict, 'sort' included, while the VASP converter gives every site its
+    # own sort. Shells mapped onto each other must therefore share one sort.
+    # Union-find over the shell images; each class takes its smallest sort.
+    parent = list(range(n_corr))
+    def find(i):
+        while parent[i] != i:
+            i = parent[i]
+        return i
+    for p in perm:
+        for ish, csh in enumerate(corr_shells):
+            jsh = shell_key[(p[csh['atom'] - 1], csh['l'], csh['dim'])]
+            ri, rj = find(ish), find(jsh)
+            if ri != rj:
+                parent[max(ri, rj)] = min(ri, rj)
+    orbits = [dict(csh) for csh in corr_shells]
+    for ish, orb in enumerate(orbits):
+        orb['sort'] = corr_shells[find(ish)]['sort']
 
     time_inv = [0] * n_symm
     mat_tinv = [np.identity(csh['dim'], complex) for csh in corr_shells]
 
-    return dict(n_symm=n_symm, n_atoms=natom, perm=perm, orbits=corr_shells,
+    return dict(n_symm=n_symm, n_atoms=natom, perm=perm, orbits=orbits,
                 SO=SO, SP=SP, time_inv=time_inv, mat=mat, mat_tinv=mat_tinv,
                 n_k_ibz=sym['n_k_ibz'], ibz_weights=sym['ibz_weights'])
