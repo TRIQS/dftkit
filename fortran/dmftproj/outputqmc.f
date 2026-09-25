@@ -220,22 +220,22 @@ C If SO is taken into account, spinor rotation matrix must be considered.
 C The spinor-rotation matrix is directly calculated from the Euler angles a,b and c.
             IF (rotloc(iatom)%timeinv) THEN
              factor=(rotloc(iatom)%a+rotloc(iatom)%g)/2.d0
-             spinrot(2,1)=EXP(CMPLX(0.d0,factor))*
+             spinrot(2,1)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DCOS(rotloc(iatom)%b/2.d0)
              spinrot(1,2)=-CONJG(spinrot(2,1))
 C Up/dn and Dn/up terms
              factor=-(rotloc(iatom)%a-rotloc(iatom)%g)/2.d0
-             spinrot(2,2)=-EXP(CMPLX(0.d0,factor))*
+             spinrot(2,2)=-EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DSIN(rotloc(iatom)%b/2.d0)
              spinrot(1,1)=CONJG(spinrot(2,2))
             ELSE
              factor=(rotloc(iatom)%a+rotloc(iatom)%g)/2.d0
-             spinrot(1,1)=EXP(CMPLX(0.d0,factor))*
+             spinrot(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DCOS(rotloc(iatom)%b/2.d0)
              spinrot(2,2)=CONJG(spinrot(1,1))
 C Up/dn and Dn/up terms
              factor=-(rotloc(iatom)%a-rotloc(iatom)%g)/2.d0
-             spinrot(1,2)=EXP(CMPLX(0.d0,factor))*
+             spinrot(1,2)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DSIN(rotloc(iatom)%b/2.d0)
              spinrot(2,1)=-CONJG(spinrot(1,2))
             ENDIF
@@ -674,7 +674,7 @@ C
                factor=srot(isym)%phase/2.d0
 C We remind that the field phase is (g-a) if beta=Pi. 
 C Up/up and Dn/dn terms
-               spinrot(1,1)=EXP(CMPLX(0.d0,factor))
+               spinrot(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))
                spinrot(2,2)=CONJG(spinrot(1,1))
 C spinrot(1,1) = -exp(+i(alpha-gamma)/2) ; spinrot(2,2) = -exp(-i(alpha-gamma)/2)
 C in good agreement with Wien conventions for the definition of this phase factor.
@@ -685,7 +685,7 @@ C
                factor=srot(isym)%phase/2.d0
 C We remind that the field phase is (a+g) if beta=0. 
 C Up/up and Dn/dn terms
-               spinrot(1,1)=EXP(CMPLX(0.d0,factor))
+               spinrot(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))
                spinrot(2,2)=CONJG(spinrot(1,1))
 C the field phase is 2pi-(alpha+gamma) in this case.
 C spinrot(1,1) = -exp(-i(alpha+gamma)/2) ; spinrot(2,2) = -exp(i(alpha-gamma)/2)
@@ -755,7 +755,7 @@ C
                factor=srot(isym)%phase/2.d0
 C We remind that the field phase is (g-a) in this case.
 C Up/up block :
-               ephase=EXP(CMPLX(0.d0,factor))
+               ephase=EXP(CMPLX(0.d0,factor,KIND=8))
 C As a result, ephase = -exp(i(alpha-gamma)/2)
                spinrot(1:2*l+1,1:2*l+1)=
      =           ephase*srot(isym)%rotrep(l,isrt)%mat(-l:l,-l:l)
@@ -771,7 +771,7 @@ C
                factor=srot(isym)%phase/2.d0
 C We remind that the field phase is (a+g) in this case.
 C Up/up block :
-               ephase=EXP(CMPLX(0.d0,factor))
+               ephase=EXP(CMPLX(0.d0,factor,KIND=8))
 C As a result, ephase = -exp(-i(alpha+gamma)/2)
                spinrot(1:2*l+1,1:2*l+1)=
      =           ephase*srot(isym)%rotrep(l,isrt)%mat(-l:l,-l:l)
@@ -1085,22 +1085,22 @@ C If SO is taken into account, spinor rotation matrix must be considered.
 C The spinor-rotation matrix is directly calculated from the Euler angles a,b and c.
             IF (rotloc(iatom)%timeinv) THEN
              factor=(rotloc(iatom)%a+rotloc(iatom)%g)/2.d0
-             spinrot(2,1)=EXP(CMPLX(0.d0,factor))*
+             spinrot(2,1)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DCOS(rotloc(iatom)%b/2.d0)
              spinrot(1,2)=-CONJG(spinrot(2,1))
 C Up/dn and Dn/up terms
              factor=-(rotloc(iatom)%a-rotloc(iatom)%g)/2.d0
-             spinrot(2,2)=-EXP(CMPLX(0.d0,factor))*
+             spinrot(2,2)=-EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DSIN(rotloc(iatom)%b/2.d0)
              spinrot(1,1)=CONJG(spinrot(2,2))
             ELSE
              factor=(rotloc(iatom)%a+rotloc(iatom)%g)/2.d0
-             spinrot(1,1)=EXP(CMPLX(0.d0,factor))*
+             spinrot(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DCOS(rotloc(iatom)%b/2.d0)
              spinrot(2,2)=CONJG(spinrot(1,1))
 C Up/dn and Dn/up terms
              factor=-(rotloc(iatom)%a-rotloc(iatom)%g)/2.d0
-             spinrot(1,2)=EXP(CMPLX(0.d0,factor))*
+             spinrot(1,2)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DSIN(rotloc(iatom)%b/2.d0)
              spinrot(2,1)=-CONJG(spinrot(1,2))
             ENDIF
@@ -1242,7 +1242,7 @@ C
                factor=srot(isym)%phase/2.d0
 C We remind that the field phase is (g-a) if beta=Pi. 
 C Up/up and Dn/dn terms
-               spinrot(1,1)=EXP(CMPLX(0.d0,factor))
+               spinrot(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))
                spinrot(2,2)=CONJG(spinrot(1,1))
 C spinrot(1,1) = -exp(i(alpha-gamma)/2) ; spinrot(2,2) = -exp(-i(alpha-gamma)/2)
 C in good agreement with Wien conventions for the definition of this phase factor.
@@ -1253,7 +1253,7 @@ C
                factor=srot(isym)%phase/2.d0
 C We remind that the field phase is (a+g) if beta=0. 
 C Up/up and Dn/dn terms
-               spinrot(1,1)=EXP(CMPLX(0.d0,factor))
+               spinrot(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))
                spinrot(2,2)=CONJG(spinrot(1,1))
 C spinrot(1,1) = -exp(-i(alpha+gamma)/2) ; spinrot(2,2) = -exp(i(alpha-gamma)/2)
 C in good agreement with Wien conventions for the definition of this phase factor.
@@ -1302,7 +1302,7 @@ C
                factor=srot(isym)%phase/2.d0
 C We remind that the field phase is (g-a) in this case.
 C Up/up block :
-               ephase=EXP(CMPLX(0.d0,factor))
+               ephase=EXP(CMPLX(0.d0,factor,KIND=8))
 C AS a result, ephase = -exp(i(alpha-gamma)/2)
                spinrot(1:2*l+1,1:2*l+1)=
      =           ephase*srot(isym)%rotrep(l,isrt)%mat(-l:l,-l:l)
@@ -1318,7 +1318,7 @@ C
                factor=srot(isym)%phase/2.d0
 C We remind that the field phase is 2pi-(alpha+gamma) in this case.
 C Up/up block :
-               ephase=EXP(CMPLX(0.d0,factor))
+               ephase=EXP(CMPLX(0.d0,factor,KIND=8))
 C As a result, ephase = -exp(-i(alpha+gamma)/2)
                spinrot(1:2*l+1,1:2*l+1)=
      =           ephase*srot(isym)%rotrep(l,isrt)%mat(-l:l,-l:l)

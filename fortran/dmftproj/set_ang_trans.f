@@ -37,7 +37,7 @@ C ----------------------------
         USE prnt
         IMPLICIT NONE
         CHARACTER(len=150) :: fullpath
-        CHARACTER(len=250) :: buf1
+        CHARACTER(len=2000) :: buf1
         CHARACTER(len=25) :: basis_file
         CHARACTER(len=1) :: repsign
         INTEGER, DIMENSION(2*(2*lmax+1)) :: degrep
@@ -140,10 +140,10 @@ C Finding the different ireps in the new basis (a "*" means the end of an irep)
                       degrep(irep)=m-ind+1
                       ind=m+1
                    ENDIF
-                   READ(buf1(2:250),*)(rtrans(m1),itrans(m1),m1=-l,l)
+                   READ(buf1(2:),*)(rtrans(m1),itrans(m1),m1=-l,l)
 C The line of the file is stored in the column of reptrans, which is temporarly "P".
                    reptrans(l,isrt)%transmat(-l:l,m)= 
-     &                  CMPLX(rtrans(-l:l),itrans(-l:l))
+     &                  CMPLX(rtrans(-l:l),itrans(-l:l),KIND=8)
                    m = m + 1
                 ENDIF
               ENDDO
@@ -201,10 +201,10 @@ C Finding the different ireps in the new basis (a "*" means the end of an irep)
                  degrep(irep)=m-ind+1
                  ind=m+1
                 ENDIF
-                READ(buf1(2:250),*)(rtrans(m1),itrans(m1),
+                READ(buf1(2:),*)(rtrans(m1),itrans(m1),
      &            m1=1,2*(2*l+1))
                 tempmat(1:2*(2*l+1),m)=
-     =            CMPLX(rtrans(1:2*(2*l+1)),itrans(1:2*(2*l+1)))
+     =            CMPLX(rtrans(1:2*(2*l+1)),itrans(1:2*(2*l+1)),KIND=8)
 C The lines of the read matrix are stored in the column of tempmat, which is then P.
               ENDDO
 C

@@ -89,7 +89,7 @@ C it comes from the symmetry operation R[isym]. That is why the field timeinv is
 C Whatever the value of beta (0 or Pi), the spinor rotation matrix of isym is block-diagonal.
 C because the time-reversal operation have been applied if necessary.
                  factor=srot(isym)%phase/2.d0
-                 ephase=EXP(CMPLX(0.d0,factor))
+                 ephase=EXP(CMPLX(0.d0,factor,KIND=8))
 C We remind that the field phase is (g-a) if beta=Pi. As a result, ephase = exp(+i(g-a)/2) = -exp(+i(alpha-gamma)/2)
 C We remind that the field phase is (a+g) if beta=0. As a result, ephase = exp(+i(a+g)/2)=-exp(-i(alpha+gamma)/2)
 C in good agreement with Wien conventions for the definition of this phase factor.
