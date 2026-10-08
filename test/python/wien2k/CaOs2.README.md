@@ -19,6 +19,16 @@ archive, including overlaps between different shells. It also checks the
 eight operations that exchange Os atoms and the unitarity of the shell
 symmetry matrices.
 
+`convert_parproj_input` is covered as well: `CaOs2.parproj` holds two radial
+partial projectors per Os d shell, and the test checks their rotation
+matrices, the Hermiticity of the density matrix below the window and the
+equivalence of the two Os shells. The partial shells coincide with the
+correlated shells, so dmftproj writes a `CaOs2.sympar` byte-identical to
+`CaOs2.symqmc`; CMake copies `CaOs2.symqmc` to `CaOs2.sympar` instead of
+shipping a duplicate, and the test checks that the two symmetry groups agree.
+`convert_transport_input` is not covered: it needs `case.pmat` from Wien2k
+`optic`, which cannot be produced from the retained inputs.
+
 ## Producer provenance
 
 The compressed `CaOs2.almblmup.gz` and `CaOs2.almblmdn.gz` are the retained
@@ -49,8 +59,9 @@ gzip -dc /path/to/fixtures/CaOs2.almblmdn.gz > CaOs2.almblmdn
 ```
 
 The directory must be named `CaOs2`, since dmftproj derives the case name from
-the working directory. Retain the resulting `.ctqmcout`, `.symqmc`, and
-`.oubwinup`; `.oubwindn` is identical and the SOC converter reads `.oubwinup`.
+the working directory. Retain the resulting `.ctqmcout`, `.symqmc`,
+`.parproj` and `.oubwinup`; `.oubwindn` is identical and the SOC converter
+reads `.oubwinup`, and `.sympar` is identical to `.symqmc`.
 Only trailing whitespace is removed from native text output.
 The original `.struct` and `.outputs` supply the converter's miscellaneous
 symmetry data. Regenerate the HDF reference with the same installed converter:
@@ -60,6 +71,7 @@ from triqs_dftkit.wien2k import Converter
 converter = Converter(filename='CaOs2')
 converter.hdf_file = 'wien2k_soc_convert.ref.h5'
 converter.convert_dft_input()
+converter.convert_parproj_input()
 ```
 
 The archive comparison checks every entry at an absolute tolerance of `1e-12`

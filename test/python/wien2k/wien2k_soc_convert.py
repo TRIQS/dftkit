@@ -30,6 +30,7 @@ def assert_archives_close(a, b, path=''):
 converter = Converter(filename='CaOs2')
 converter.hdf_file = 'wien2k_soc_convert.out.h5'
 converter.convert_dft_input()
+converter.convert_parproj_input()
 
 if mpi.is_master_node():
     with HDFArchive(converter.hdf_file, 'r') as archive:
@@ -60,6 +61,32 @@ if mpi.is_master_node():
                 np.testing.assert_allclose(matrix @ matrix.conj().T,
                                            np.eye(matrix.shape[0]),
                                            atol=1e-6, rtol=0)
+
+        parproj = archive[converter.parproj_subgrp]
+        assert list(parproj['n_parproj']) == [2, 2]
+        assert list(parproj['rot_mat_all_time_inv']) == [0, 0]
+        n_band = data['n_orbitals'][0, 0]
+        for ish in range(data['n_shells']):
+            np.testing.assert_array_equal(parproj['rot_mat_all'][ish],
+                                          data['rot_mat'][ish])
+            dens_below = parproj['dens_mat_below'][0][ish]
+            np.testing.assert_allclose(dens_below, dens_below.conj().T,
+                                       atol=1e-12, rtol=0)
+        # The two Os shells are symmetry-equivalent.
+        for ir in range(2):
+            norms = [np.linalg.norm(parproj['proj_mat_all'][0, 0, ish, ir, :, :n_band])
+                     for ish in range(data['n_shells'])]
+            np.testing.assert_allclose(norms[0], norms[1], rtol=1e-8)
+
+        # Partial shells coincide with the correlated shells, so sympar
+        # must reproduce the symqmc symmetry data.
+        symmpar = archive[converter.symmpar_subgrp]
+        assert symmpar['n_symm'] == symmetry['n_symm']
+        assert list(symmpar['time_inv']) == list(symmetry['time_inv'])
+        for key in ('perm', 'mat', 'mat_tinv'):
+            for a, b in zip(symmpar[key], symmetry[key]):
+                np.testing.assert_array_equal(np.array(a), np.array(b))
+
     with HDFArchive(converter.hdf_file, 'r') as out, \
             HDFArchive('wien2k_soc_convert.ref.h5', 'r') as ref:
         assert_archives_close(out, ref)
