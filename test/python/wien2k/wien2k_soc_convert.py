@@ -1,39 +1,36 @@
-################################################################################
-#
-# TRIQS: a Toolbox for Research in Interacting Quantum Systems
-#
-# Copyright (C) 2011 by M. Aichhorn, L. Pourovskii, V. Vildosola
-#
-# TRIQS is free software: you can redistribute it and/or modify it under the
-# terms of the GNU General Public License as published by the Free Software
-# Foundation, either version 3 of the License, or (at your option) any later
-# version.
-#
-# TRIQS is distributed in the hope that it will be useful, but WITHOUT ANY
-# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
-# details.
-#
-# You should have received a copy of the GNU General Public License along with
-# TRIQS. If not, see <http://www.gnu.org/licenses/>.
-#
-################################################################################
-
 # Spin-orbit + spin-polarized Wien2k converter test.
-#
-# CaOs2 is a cubic fluorite-type cell with two symmetry-equivalent correlated Os
-# atoms; its magnetic point group has 16 operations, 8 of them time-reversal.
-# This exercises the SOC path of dmftproj and the converter (combined-spin 'ud'
-# block, time-reversal symmetry operations) that the non-SOC SrVO3 test does not.
+# See CaOs2.README.md for the native producer inputs and band window.
 
-from h5 import *
+from h5 import HDFArchive
+import numpy as np
 from triqs.utility.h5diff import h5diff
 import triqs.utility.mpi as mpi
 from triqs_dftkit.wien2k import Converter
 
-Converter = Converter(filename='CaOs2')
-Converter.hdf_file = 'wien2k_soc_convert.out.h5'
-Converter.convert_dft_input()
+converter = Converter(filename='CaOs2')
+converter.hdf_file = 'wien2k_soc_convert.out.h5'
+converter.convert_dft_input()
 
 if mpi.is_master_node():
-    h5diff('wien2k_soc_convert.out.h5', 'wien2k_soc_convert.ref.h5')
+    with HDFArchive(converter.hdf_file, 'r') as archive:
+        data = archive['dft_input']
+        assert data['SP'] == data['SO'] == 1
+        assert data['proj_mat'].shape[1] == 1
+        assert data['n_k'] == 1
+        assert data['n_corr_shells'] == 2
+        assert [shell['dim'] for shell in data['corr_shells']] == [10, 10]
+        np.testing.assert_allclose(data['bz_weights'].sum(), 1.0, atol=1e-14)
+        for ik in range(data['n_k']):
+            n_band = data['n_orbitals'][ik, 0]
+            blocks = [data['proj_mat'][ik, 0, ish, :shell['dim'], :n_band]
+                      for ish, shell in enumerate(data['corr_shells'])]
+            # Test the full correlated subspace, including cross-shell overlaps.
+            projector = np.vstack(blocks)
+            assert n_band >= projector.shape[0]
+            np.testing.assert_allclose(projector @ projector.conj().T,
+                                       np.eye(projector.shape[0]),
+                                       atol=1e-6, rtol=0)
+        symmetry = archive[converter.symmcorr_subgrp]
+        assert symmetry['n_symm'] == 16
+        assert list(symmetry['time_inv']) == [0] * 8 + [1] * 8
+    h5diff(converter.hdf_file, 'wien2k_soc_convert.ref.h5', precision=1e-12)
