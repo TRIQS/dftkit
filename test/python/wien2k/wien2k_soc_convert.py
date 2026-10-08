@@ -3,9 +3,29 @@
 
 from h5 import HDFArchive
 import numpy as np
-from triqs.utility.h5diff import h5diff
 import triqs.utility.mpi as mpi
 from triqs_dftkit.wien2k import Converter
+
+
+def assert_archives_close(a, b, path=''):
+    """Recursive comparison at absolute tolerance 1e-12.
+
+    triqs.utility.h5diff compares arrays at 1e-6 whatever precision is
+    passed, so it cannot check this tolerance.
+    """
+    if hasattr(a, 'keys'):
+        assert set(a.keys()) == set(b.keys()), path
+        for key in a.keys():
+            assert_archives_close(a[key], b[key], f'{path}/{key}')
+    elif isinstance(a, (list, tuple)):
+        assert len(a) == len(b), path
+        for i, (x, y) in enumerate(zip(a, b)):
+            assert_archives_close(x, y, f'{path}[{i}]')
+    elif isinstance(a, (np.ndarray, np.number, int, float, complex)):
+        np.testing.assert_allclose(a, b, atol=1e-12, rtol=0, err_msg=path)
+    else:
+        assert a == b, path
+
 
 converter = Converter(filename='CaOs2')
 converter.hdf_file = 'wien2k_soc_convert.out.h5'
@@ -40,4 +60,6 @@ if mpi.is_master_node():
                 np.testing.assert_allclose(matrix @ matrix.conj().T,
                                            np.eye(matrix.shape[0]),
                                            atol=1e-6, rtol=0)
-    h5diff(converter.hdf_file, 'wien2k_soc_convert.ref.h5', precision=1e-12)
+    with HDFArchive(converter.hdf_file, 'r') as out, \
+            HDFArchive('wien2k_soc_convert.ref.h5', 'r') as ref:
+        assert_archives_close(out, ref)

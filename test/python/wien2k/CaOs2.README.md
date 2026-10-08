@@ -62,6 +62,8 @@ converter.hdf_file = 'wien2k_soc_convert.ref.h5'
 converter.convert_dft_input()
 ```
 
-The archive comparison uses an explicit `1e-12` tolerance for conversion of
-the same fixture bytes. The physical overlap check uses `1e-6` because the
+The archive comparison checks every entry at an absolute tolerance of `1e-12`
+for conversion of the same fixture bytes. It does not use
+`triqs.utility.h5diff`, which compares arrays at `1e-6` regardless of its
+`precision` argument. The physical overlap check uses `1e-6` because the
 retained Wien2k inputs and native text output have finite precision.
