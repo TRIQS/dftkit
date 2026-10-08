@@ -32,7 +32,8 @@ class TestConverterSVO(mytest.MyTestCase):
         converter = Converter(filename=_rpath + 'svo',
                                   hdf_filename=test_file)
 
-        converter.convert_dft_input()
+        # full-grid reference; the IBZ conversion is covered by test_converter_ibz
+        converter.convert_dft_input(use_ibz=False)
 
         expected_file = _rpath + 'svo.ref.h5'
         self.assertH5FileEqual(test_file, expected_file)
