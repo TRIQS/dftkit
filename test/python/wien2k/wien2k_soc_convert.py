@@ -17,6 +17,7 @@ if mpi.is_master_node():
         assert data['SP'] == data['SO'] == 1
         assert data['proj_mat'].shape[1] == 1
         assert data['n_k'] == 1
+        assert list(data['rot_mat_time_inv']) == [0, 0]
         assert data['n_corr_shells'] == 2
         assert [shell['dim'] for shell in data['corr_shells']] == [10, 10]
         np.testing.assert_allclose(data['bz_weights'].sum(), 1.0, atol=1e-14)
@@ -33,4 +34,10 @@ if mpi.is_master_node():
         symmetry = archive[converter.symmcorr_subgrp]
         assert symmetry['n_symm'] == 16
         assert list(symmetry['time_inv']) == [0] * 8 + [1] * 8
+        assert sum(perm[1:] == [3, 2] for perm in symmetry['perm']) == 8
+        for operation in symmetry['mat']:
+            for matrix in operation:
+                np.testing.assert_allclose(matrix @ matrix.conj().T,
+                                           np.eye(matrix.shape[0]),
+                                           atol=1e-6, rtol=0)
     h5diff(converter.hdf_file, 'wien2k_soc_convert.ref.h5', precision=1e-12)
