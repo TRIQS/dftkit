@@ -22,6 +22,7 @@ def assert_archives_close(a, b, path=''):
         for i, (x, y) in enumerate(zip(a, b)):
             assert_archives_close(x, y, f'{path}[{i}]')
     elif isinstance(a, (np.ndarray, np.number, int, float, complex)):
+        assert np.shape(a) == np.shape(b), path
         np.testing.assert_allclose(a, b, atol=1e-12, rtol=0, err_msg=path)
     else:
         assert a == b, path
