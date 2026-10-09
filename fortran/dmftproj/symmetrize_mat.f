@@ -99,13 +99,13 @@ C For up/up and dn/dn blocks, no phase factor is needed.
                  ephase=1.d0
 C For the up/dn block, initialisation of the phase factor
                  IF(is==3) THEN
-                  ephase=EXP(CMPLX(0d0,srot(isym)%phase))
+                  ephase=EXP(CMPLX(0d0,srot(isym)%phase,KIND=8))
 C if srot%timeinv = .TRUE. , phase= g-a = 2pi+(alpha-gamma) and ephase = exp(+i(g-a)) = exp(+i(alpha-gamma)) 
 C if srot%timeinv = .FALSE., phase= a+g = 2pi-(alpha+gamma) and ephase = exp(+i(a+g)) = exp(-i(alpha+gamma))
                  ENDIF
 C For the dn/up block, initialisation of the phase factor
                  IF(is==4) THEN
-                  ephase=EXP(CMPLX(0d0,-srot(isym)%phase))
+                  ephase=EXP(CMPLX(0d0,-srot(isym)%phase,KIND=8))
 C if srot%timeinv = .TRUE. , phase= g-a = 2pi+(alpha-gamma) and ephase = exp(-i(g-a)) = exp(-i(alpha-gamma)) 
 C if srot%timeinv = .FALSE., phase= a+g = 2pi-(alpha+gamma) and ephase = exp(-i(a+g)) = exp(+i(alpha+gamma))
                  ENDIF
@@ -231,13 +231,13 @@ C For up/up and dn/dn blocks, no phase factor is needed.
                  ephase=1.d0
 C For the up/dn block, initialisation of the phase factor
                  IF(is==3) THEN
-                  ephase=EXP(CMPLX(0d0,srot(isym)%phase))
+                  ephase=EXP(CMPLX(0d0,srot(isym)%phase,KIND=8))
 C if srot%timeinv = .TRUE. , phase= g-a = 2pi+(alpha-gamma) and ephase = exp(+i(g-a)) = exp(+i(alpha-gamma)) 
 C if srot%timeinv = .FALSE., phase= a+g = 2pi-(alpha+gamma) and ephase = exp(+i(a+g)) = exp(-i(alpha+gamma))
                  ENDIF
 C For the dn/up block, initialisation of the phase factor
                  IF(is==4) THEN
-                  ephase=EXP(CMPLX(0d0,-srot(isym)%phase))
+                  ephase=EXP(CMPLX(0d0,-srot(isym)%phase,KIND=8))
 C if srot%timeinv = .TRUE. , phase= g-a = 2pi+(alpha-gamma) and ephase = exp(-i(g-a)) = exp(-i(alpha-gamma)) 
 C if srot%timeinv = .FALSE., phase= a+g = 2pi-(alpha+gamma) and ephase = exp(-i(a+g)) = exp(+i(alpha+gamma))
                  ENDIF
