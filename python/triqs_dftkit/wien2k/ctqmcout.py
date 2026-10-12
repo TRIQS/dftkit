@@ -49,293 +49,41 @@ It follows the Fortran path field by field:
   symmetry operation mapping the representative atom onto each equivalent one
   (set_rotloc.f / setsym.f).
 
-ctqmcout layout is outputqmc.f:66-613. The cubic transform coefficients are
-stored in dmftproj via a single-precision CMPLX cast (set_ang_trans.f:146);
-to match the committed file the transmat is cast to complex64 before use
-(e.g. 0.70710676908 for 1/sqrt2). This step supports spin-polarized SO
-calculations with identity struct local rotations; other paths are rejected.
+ctqmcout layout is outputqmc.f:66-613. The cubic transform uses the exact
+analytic harmonics; with the precision-fixed dmftproj (full double precision
+templates and KIND=8 casts) the port reproduces case.ctqmcout to machine
+precision on a full-rank window.
 """
 
-import math
 import os
 import numpy as np
+from scipy.linalg.lapack import zheev
+from scipy.linalg.blas import zgemm
 
-
-# --- list-directed token stream over a Fortran free-form text file -----------
-
-class _Reader:
-    def __init__(self, path):
-        with open(path) as fh:
-            self._lines = fh.read().splitlines()
-        self._i = 0
-
-    def skip(self):
-        self._i += 1
-
-    def record(self):
-        toks = self._lines[self._i].split()
-        self._i += 1
-        return toks
-
-
-def _to_float(tok):
-    return float(tok.replace('D', 'E').replace('d', 'e'))
-
-
-def _to_complex(s):
-    s = s.strip().lstrip('(').rstrip(')')
-    re_s, im_s = s.split(',')
-    return complex(_to_float(re_s), _to_float(im_s))
-
-
-def _read_complex(r):
-    """Read one list-directed complex `(re,im)` value, possibly split over
-    whitespace tokens."""
-    buf = list(r.record())
-    while ')' not in ''.join(buf):
-        buf += r.record()
-    return _to_complex(''.join(buf))
-
-
-def _read_two_complex(r):
-    """Read a record holding two list-directed complex values (Alm, Blm)."""
-    buf = list(r.record())
-    while ''.join(buf).count(')') < 2:
-        buf += r.record()
-    s = ''.join(buf)
-    cut = s.index(')') + 1
-    return _to_complex(s[:cut]), _to_complex(s[cut:])
-
-
-# --- angular basis: cubic d transform transmat = <new_i|lm> ------------------
-# Wien2k cubic d convention dz2, dx2-y2, dxy, dxz, dyz (set_ang_trans cubic);
-# identical to symqmc._CUBIC[2].
-
-_CUBIC = {
-    2: np.array([
-        [0, 0, 1, 0, 0],
-        [2 ** -0.5, 0, 0, 0, 2 ** -0.5],
-        [-(2 ** -0.5), 0, 0, 0, 2 ** -0.5],
-        [0, 2 ** -0.5, 0, -(2 ** -0.5), 0],
-        [0, 2 ** -0.5, 0, 2 ** -0.5, 0],
-    ], dtype=complex),
-}
-
-
-def _reptrans(basis, l):
-    """transmat = <new_i|lm>. dmftproj stores cubic/fromfile coefficients via a
-    single-precision CMPLX cast (set_ang_trans.f:146); reproduce the float32
-    truncation of these coefficients. Other native phase operations still
-    differ at the single-precision floor."""
-    if basis == 'cubic' and l in _CUBIC:
-        return _CUBIC[l].astype(np.complex64).astype(np.complex128)
-    if basis == 'cubic' and l != 0:
-        raise NotImplementedError('cubic ctqmcout currently supports s and d shells')
-    return np.eye(2 * l + 1, dtype=complex)
-
-
-# --- Wigner D matrix (dmftproj convention, setsym.f dmat) --------------------
-
-def _small_d(l, m, n, b):
-    f1 = (math.factorial(l + m) * math.factorial(l - m)) / \
-         (math.factorial(l + n) * math.factorial(l - n))
-    s = 0.0
-    for t in range(0, 2 * l + 1):
-        if (l - m - t) >= 0 and (l - n - t) >= 0 and (t + n + m) >= 0:
-            f2 = (math.factorial(l + n) * math.factorial(l - n)) / \
-                 (math.factorial(l - m - t) * math.factorial(m + n + t) *
-                  math.factorial(l - n - t) * math.factorial(t))
-            f3 = 1.0 if (2 * l - m - n - 2 * t) == 0 \
-                else math.sin(b / 2) ** (2 * l - m - n - 2 * t)
-            f4 = 1.0 if (2 * t + n + m) == 0 \
-                else math.cos(b / 2) ** (2 * t + n + m)
-            s += (-1) ** (l - m - t) * f2 * f3 * f4
-    return math.sqrt(f1) * s
-
-
-def _dmat(l, a, b, c, det):
-    D = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        for n in range(-l, l + 1):
-            v = np.exp(1j * n * a) * np.exp(1j * m * c) * _small_d(l, m, n, b)
-            if det < -0.5:
-                v *= (-1) ** l
-            D[m + l, n + l] = v
-    return D
-
-
-def _tmat(l):
-    T = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        T[-m + l, m + l] = (-1) ** m
-    return T
+from ._dmftproj import (require_identity_struct, validate_so_windows, band_index_window, dmat, fmt_scalar, read_almblm,
+                        read_dmftsym, read_fromfile, read_indmftpr, reptrans,
+                        rotloc_rotl_so, select_band_window, select_window,
+                        tmat, write_row)
 
 
 def _sqrt_inv(O):
-    """O^{-1/2} of a Hermitian matrix (orthogonal.f sqrtm with inv=.TRUE.:
-    Z diag(w^{-1/2}) Z^H). dmftproj evaluates 1/sqrt of the eigenvalue as a
-    *complex* sqrt (W_comp = CMPLX(W,0)), so a (numerically) negative
-    eigenvalue contributes i/sqrt(|w|) rather than NaN; reproduce that with a
-    complex power. The final result D1 @ conj(Z).T matches sqrtm exactly."""
-    w, Z = np.linalg.eigh(O)
-    if w[0] <= np.finfo(float).eps * len(w) * abs(w[-1]):
+    """O^{-1/2} of a Hermitian matrix, reproducing orthogonal.f sqrtm
+    (inv=.TRUE.: Z diag(w^{-1/2}) Z^H). Use the same LAPACK routine the Fortran
+    calls, ZHEEV('V','U'), via scipy so the eigenvectors match rather than the
+    divide-and-conquer ZHEEVD of numpy.linalg.eigh. dmftproj takes 1/sqrt of the
+    eigenvalue as a *complex* sqrt (W_comp = CMPLX(W,0)); reproduce that with a
+    complex power. The result D1 @ conj(Z).T matches the Fortran's ZGEMM('N','T').
+
+    Full-rank overlaps give a well-defined inverse square root. Singular
+    overlaps cannot define orthonormal correlated projectors and are rejected.
+    """
+    w, Z, info = zheev(O, compute_v=1, lower=0)   # 'V', 'U'
+    if info != 0:
+        raise np.linalg.LinAlgError(f'Loewdin eigensolver failed (info={info})')
+    if w[0] <= np.finfo(float).eps * len(w) * max(abs(w[-1]), 1.):
         raise ValueError('Loewdin overlap is rank deficient; widen the projection window')
-    D1 = Z * (w.astype(complex) ** -0.5)        # Z @ diag(w^{-1/2})
-    return D1 @ np.conj(Z).T
-
-
-# --- inputs ------------------------------------------------------------------
-
-def _read_indmftpr(indmftpr):
-    raw = [l.split('!')[0].strip() for l in open(indmftpr)]
-    raw = [l for l in raw if l != '']
-    nsort = int(raw[0].split()[0])
-    mult = [int(x) for x in raw[1].split()][:nsort]
-    lmax = int(raw[2].split()[0])
-    i = 3
-    so = 0
-    sorts = []
-    for isort in range(nsort):
-        basis = raw[i].split()[0]
-        i += 1
-        if basis == 'fromfile':
-            i += 1
-        l_inc = [int(x) for x in raw[i].split()]
-        i += 1
-        ireps = [int(x) for x in raw[i].split()]
-        i += 1
-        correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
-        included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        for l in correlated_ls:
-            if ireps[l] > 1 or (ireps[l] == 1 and raw[i].strip() != '1'):
-                raise NotImplementedError('selection of individual irreducible representations is not implemented')
-            if ireps[l] > 0:
-                i += 1
-        if correlated_ls:
-            sort_so = int(raw[i].split()[0])
-            if sort_so not in (0, 1):
-                raise ValueError('spin-orbit flags must be 0 or 1')
-            if any(s['correlated_ls'] for s in sorts) and sort_so != so:
-                raise NotImplementedError('different spin-orbit flags across correlated sorts are not implemented')
-            so = sort_so
-            i += 1
-        sorts.append(dict(basis=basis, correlated_ls=correlated_ls,
-                          included_ls=included_ls))
-    last = raw[-1].split()
-    e_bot, e_top = _to_float(last[0]), _to_float(last[1])
-    proj_mode = int(last[2]) if len(last) >= 3 else 0
-    return dict(nsort=nsort, mult=mult, lmax=lmax, sorts=sorts, so=so,
-                e_bot=e_bot, e_top=e_top, proj_mode=proj_mode)
-
-
-def _read_dmftsym(path):
-    lines = open(path).read().split('\n')
-    nsym = int(lines[0].split()[0])
-    perms = [[int(x) for x in lines[1 + i].split()] for i in range(nsym)]
-    starts = [i for i, l in enumerate(lines) if 'Sym. op.' in l]
-    ops = []
-    for k, s in enumerate(starts[:nsym]):
-        toks = lines[s + 1].split()
-        a, b, g = (math.radians(float(x)) for x in toks[:3])
-        iprop = int(toks[3])
-        krotm = np.array([[_to_float(x) for x in lines[s + 2 + r].split()]
-                          for r in range(3)])
-        ops.append(dict(perm=perms[k], a=a, b=b, g=g, iprop=iprop,
-                        krotm=krotm))
-    return nsym, ops
-
-
-# --- almblm parsing ----------------------------------------------------------
-
-def _read_almblm(path, info):
-    nsort = info['nsort']
-    lmax = info['lmax']
-    mult = info['mult']
-    nlm = (lmax + 1) ** 2
-    natom = sum(mult)
-
-    r = _Reader(path)
-    elecn = _to_float(r.record()[0])
-    nk = int(r.record()[0])
-    r.record()                         # nloat
-    eferm = _to_float(r.record()[0])
-
-    nLO = {}
-    ovl_LO_u = {}
-    kp = [None] * nk
-
-    for isrt in range(1, nsort + 1):
-        for l in range(lmax + 1):
-            r.record()                 # u_dot_norm(l)
-            n = int(r.record()[0])
-            if n > 1:
-                raise NotImplementedError('more than one local orbital per angular momentum is not implemented')
-            nLO[(l, isrt)] = n
-            for ilo in range(1, n + 1):
-                toks = r.record()
-                ovl_LO_u[(ilo, l, isrt)] = _to_float(toks[0])
-        for ik in range(nk):
-            r.skip()                   # "IK = .." banner
-            r.skip()                   # 3-int line
-            head = r.record()
-            nbmin, nbmax = int(head[1]), int(head[2])
-            nb = nbmax - nbmin + 1
-            if kp[ik] is None:
-                kp[ik] = dict(
-                    nbmin=nbmin, nbmax=nbmax, eband=None, weight=None,
-                    Alm=np.zeros((nlm, natom + 1, nb), dtype=complex),
-                    Clm=np.zeros((1, nlm, natom + 1, nb), dtype=complex))
-            eband = np.empty(nb)
-            weight = None
-            for off in range(nb):
-                toks = r.record()
-                if off == 0:
-                    weight = _to_float(toks[0])
-                eband[off] = _to_float(toks[1])
-            eband = eband - eferm
-            if kp[ik]['eband'] is None:
-                kp[ik]['eband'] = eband
-                kp[ik]['weight'] = weight
-            for imu in range(1, mult[isrt - 1] + 1):
-                iatom = sum(mult[:isrt - 1]) + imu
-                r.skip()               # banner
-                r.record()             # idum
-                for off in range(nb):
-                    lm = 0
-                    for l in range(lmax + 1):
-                        for m in range(-l, l + 1):
-                            alm, _blm = _read_two_complex(r)
-                            kp[ik]['Alm'][lm, iatom, off] = alm
-                            for ilo in range(nLO[(l, isrt)]):
-                                clm = _read_complex(r)
-                                kp[ik]['Clm'][ilo, lm, iatom, off] = clm
-                            lm += 1
-
-    return dict(elecn=elecn, eferm=eferm, nk=nk, nlm=nlm, natom=natom,
-                nLO=nLO, ovl_LO_u=ovl_LO_u, kp=kp)
-
-
-# --- band-window selection (set_projections.f, proj_mode==0) -----------------
-
-def _select_window(nbmin, nbmax, eband, e1, e2):
-    opened = False
-    included = False
-    nb_bot = nb_top = 0
-    for off, ib in enumerate(range(nbmin, nbmax + 1)):
-        e = eband[off]
-        if not opened and e > e1 and e <= e2:
-            opened = True
-            nb_bot = ib
-        elif opened and e > e2:
-            nb_top = ib - 1
-            included = True
-            break
-        elif ib == nbmax and e > e1 and e <= e2:
-            nb_top = ib
-            included = True
-    if not included:
-        nb_bot = nb_top = 0
-    return included, nb_bot, nb_top
+    D1 = Z * (w.astype(complex) ** -0.5)          # Z @ diag(w^{-1/2})
+    return zgemm(1.0, D1, np.conj(Z), trans_b=1)  # ZGEMM('N','T'): D1 @ conj(Z)^T
 
 
 # --- correlated / included orbital descriptors -------------------------------
@@ -376,9 +124,9 @@ def _rloc_rotrep(op, l, transmat):
     det2 = krotm[0, 0] * krotm[1, 1] - krotm[0, 1] * krotm[1, 0]
     timeinv = det2 < 0.0
     phase = (g - a) if timeinv else (a + g)
-    D = _dmat(l, a, b, g, float(iprop))
+    D = dmat(l, a, b, g, float(iprop))
     if timeinv:
-        D = _tmat(l) @ np.conj(D)       # setsym.f:320-326 orbital time reversal
+        D = tmat(l) @ np.conj(D)       # setsym.f:320-326 orbital time reversal
     ephase = np.exp(1j * phase / 2)
     d = 2 * l + 1
     rotl = np.zeros((2 * d, 2 * d), dtype=complex)
@@ -391,39 +139,25 @@ def _rloc_rotrep(op, l, transmat):
     return rotrep, timeinv
 
 
+def _rloc_rotrep_mixing(l, ref, ops, iatom, iref, P):
+    """rotloc(iatom)%rotrep(l)%mat for a mixing SO shell: the composed Rloc
+    spinor rotation (rotloc_rotl_so) put into the new basis with the full
+    2(2l+1) transmat P (set_rotloc.f mixing branch). Returns (rotrep, timeinv)."""
+    rotl, timeinv = rotloc_rotl_so(l, ref, ops, iatom, iref)
+    rotrep = (P @ rotl @ P.T) if timeinv else (P @ rotl @ np.conj(P.T))
+    return rotrep, timeinv
+
+
 # --- ctqmcout writer ---------------------------------------------------------
-
-def _fmt(x):
-    """One list-directed real, gfortran-style (leading sign space, ~17 sig)."""
-    return '  %.16E' % float(x)
-
-
-def _w(f, arr):
-    f.write(''.join(_fmt(x) for x in arr) + '\n')
-
-
-def _fmt_scalar(x):
-    x = float(x)
-    return '%.16f' % x if abs(x) < 1e5 else '%.16E' % x
-
 
 def write_ctqmcout(case):
     """Read <case>.almblm{up,dn}, <case>.indmftpr, <case>.struct,
     <case>.dmftsym and write <case>.ctqmcout in the dmftproj format."""
-    info = _read_indmftpr(case + '.indmftpr')
+    info = read_indmftpr(case + '.indmftpr')
     if not info['so']:
-        raise NotImplementedError('non-spin-orbit ctqmcout is not implemented yet')
-    if info['proj_mode'] != 0:
-        raise NotImplementedError('ctqmcout currently supports projection mode 0')
-    with open(case + '.struct') as f:
-        struct_lines = f.readlines()
-    for i, line in enumerate(struct_lines):
-        if 'LOCAL ROT MATRIX:' in line:
-            rows = [line.split(':', 1)[1], *struct_lines[i + 1:i + 3]]
-            rotation = np.array([[float(x) for x in row.split()] for row in rows])
-            if not np.allclose(rotation, np.eye(3), atol=1e-7, rtol=0):
-                raise NotImplementedError('non-identity struct local rotations are not implemented yet')
-    nsym, ops = _read_dmftsym(case + '.dmftsym')
+        raise NotImplementedError('non-spin-orbit projectors are not implemented yet')
+    require_identity_struct(case)
+    nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
 
     up, dn = case + '.almblmup', case + '.almblmdn'
     if os.path.exists(up) and os.path.exists(dn):
@@ -432,54 +166,46 @@ def write_ctqmcout(case):
         spin_files = [case + '.almblm']
     ifSP = len(spin_files) == 2
     ifSO = bool(info['so'])
-    if not ifSP:
-        raise ValueError('spin-orbit ctqmcout requires both up and down almblm files')
     ns = 2 if ifSP else 1
 
-    spins = [_read_almblm(p, info) for p in spin_files]
+    spins = [read_almblm(p, info, projectors=True) for p in spin_files]
     nk = spins[0]['nk']
     elecn = spins[0]['elecn']
 
     crorbs = _build_crorbs(info)
-    if any(cr['basis'] == 'fromfile' for cr in crorbs):
-        raise NotImplementedError(
-            'ctqmcout for fromfile/mixing correlated bases is not yet covered '
-            'by a test fixture; cubic and complex bases are supported')
     orbs = _build_orbs(info)
     ncrorb = len(crorbs)
     norb = len(orbs)
 
-    # window in [e_bot, e_top]
+    # band-index window for proj_mode 1/2 (set_projections is called with band
+    # indices, not energies). proj_mode 1 scans all spins for the global window.
+    bw = band_index_window(info, spins) if info['proj_mode'] != 0 else None
+
+    # window in [e_bot, e_top]  (proj_mode 0) or [b_bot, b_top]  (mode 1/2)
     windows = []
     for ik in range(nk):
         kp = spins[0]['kp'][ik]
-        windows.append(_select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
-                                     info['e_bot'], info['e_top']))
+        if info['proj_mode'] == 0:
+            windows.append(select_window(
+                kp['nbmin'], kp['nbmax'], kp['eband'],
+                info['e_bot'], info['e_top']))
+        else:
+            windows.append(select_band_window(
+                kp['nbmin'], kp['nbmax'], bw[0], bw[1]))
 
-    for spin in spins[1:]:
-        if spin['nk'] != nk:
-            raise ValueError('up/down k-point counts differ')
-        for ik, window in enumerate(windows):
-            kp = spin['kp'][ik]
-            other = _select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
-                                   info['e_bot'], info['e_top'])
-            if other != window:
-                raise ValueError('spin-orbit run requires identical up/dn band windows')
-    if not all(window[0] for window in windows):
-        raise ValueError('ctqmcout requires an included band window at every k-point')
-
-    # window below e_bot (for qbbot)
+    # window below e_bot (mode 0) or below b_bot (mode 1/2), for qbbot.
+    # Mode 1/2: set_projections(1, b_bot-1) -> select_band_window with top=b_bot-1.
     win_below = []
     for ik in range(nk):
         kp = spins[0]['kp'][ik]
-        win_below.append(_select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
-                                       -1e6, info['e_bot']))
+        if info['proj_mode'] == 0:
+            win_below.append(select_window(
+                kp['nbmin'], kp['nbmax'], kp['eband'], -1e6, info['e_bot']))
+        else:
+            win_below.append(select_band_window(
+                kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
 
-    for spin in spins[1:]:
-        for ik, kp in enumerate(spin['kp']):
-            lower = _select_window(kp['nbmin'], kp['nbmax'], kp['eband'], -1e6, info['e_bot'])
-            if lower != win_below[ik]:
-                raise ValueError('spin-orbit run requires identical up/dn below-window bands')
+    validate_so_windows(spins, info, windows)
 
     # qbbot: point integration over bands below e_bot, is=1 only under SO
     qbbot = 0.0
@@ -491,8 +217,15 @@ def write_ctqmcout(case):
         if ifSO:
             break
 
-    transmats = {(cr['l'], cr['sort']): _reptrans(cr['basis'], cr['l'])
-                 for cr in crorbs}
+    transmats = {}
+    mixing = {}
+    for cr in crorbs:
+        key = (cr['l'], cr['sort'])
+        if cr['basis'] == 'fromfile':
+            transmats[key], mixing[key] = read_fromfile(
+                info['sorts'][cr['sort'] - 1]['sourcefile'], cr['l'])
+        else:
+            transmats[key], mixing[key] = reptrans(cr['basis'], cr['l']), False
 
     # rotloc Euler angles per crorb: the symmetry op mapping the representative
     # atom of the sort onto this atom (set_rotloc.f). With identity struct
@@ -507,27 +240,31 @@ def write_ctqmcout(case):
                               if o['perm'][iref - 1] == cr['atom'])
 
     # ---- raw correlated projector mat_rep, then Loewdin orthonormalize ----
-    # mat_rep[(icr, ik, is)] -> (2l+1, nbsel)
+    # Non-mixing: mat_rep[(icr, ik, is)] -> (2l+1, nbsel) per spin block.
+    # Mixing: mat_rep[(icr, ik)] -> (2*(2l+1), nbsel), the stacked spinor block.
     mat_rep = {}
     for icr, cr in enumerate(crorbs):
         l = cr['l']
         atom = cr['atom']
         sort = cr['sort']
+        d = 2 * l + 1
         transmat = transmats[(l, sort)]
+        ismix = mixing[(l, sort)]
         op = rotloc_op[icr]
-        rot = _dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
+        rot = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
         for ik in range(nk):
             incl, nb_bot, nb_top = windows[ik]
             if not incl:
                 continue
+            nbsel = nb_top - nb_bot + 1
+            spin_blocks = []
             for ispin in range(ns):
                 sp = spins[ispin]
                 kp = sp['kp'][ik]
                 off_bot = nb_bot - kp['nbmin']
                 off_top = nb_top - kp['nbmin']
                 nlo = sp['nLO'][(l, sort)]
-                nbsel = off_top - off_bot + 1
-                P = np.zeros((2 * l + 1, nbsel), dtype=complex)
+                P = np.zeros((d, nbsel), dtype=complex)
                 for mi, m in enumerate(range(-l, l + 1)):
                     lm = l * l + (m + l)        # 0-based packed index
                     for j, off in enumerate(range(off_bot, off_top + 1)):
@@ -536,29 +273,42 @@ def write_ctqmcout(case):
                             val += kp['Clm'][ilo, lm, atom, off] * \
                                 sp['ovl_LO_u'][(ilo + 1, l, sort)]
                         P[mi, j] = val
-                # rot_projectmat (local rotation) then the basis transform
-                P = transmat @ (rot @ P)
-                mat_rep[(icr, ik, ispin)] = P
+                spin_blocks.append(rot @ P)     # rot_projectmat per spin
+            if ismix:
+                stack = np.vstack(spin_blocks)  # (2*(2l+1), nbsel), up then dn
+                mat_rep[(icr, ik)] = transmat @ stack
+            else:
+                for ispin in range(ns):
+                    mat_rep[(icr, ik, ispin)] = transmat @ spin_blocks[ispin]
 
-    # Loewdin: per k stack all crorb rows (is=1 block then is=2 block per crorb)
+    # Loewdin: per k stack all crorb rows. A mixing crorb contributes its full
+    # 2(2l+1) block once (is=1 only); a non-mixing one the two (2l+1) spin
+    # blocks (orthogonal_wannier_SO ndim layout).
     for ik in range(nk):
         incl, nb_bot, nb_top = windows[ik]
         if not incl:
             continue
         blocks = []
-        layout = []  # (icr, is, nrows)
+        layout = []  # (key, nrows)
         for icr, cr in enumerate(crorbs):
             l = cr['l']
-            for ispin in range(ns):
-                blocks.append(mat_rep[(icr, ik, ispin)])
-                layout.append((icr, ispin, 2 * l + 1))
+            if mixing[(l, cr['sort'])]:
+                blocks.append(mat_rep[(icr, ik)])
+                layout.append(((icr, ik), 2 * (2 * l + 1)))
+            else:
+                for ispin in range(ns):
+                    blocks.append(mat_rep[(icr, ik, ispin)])
+                    layout.append(((icr, ik, ispin), 2 * l + 1))
         D = np.vstack(blocks)                 # ndim x nbnd
-        O = D @ np.conj(D.T)
+        # match the Fortran's exact BLAS calls (orthogonal_wannier_SO): the
+        # near-singular O^{-1/2} amplifies any last-bit difference, so use the
+        # identical ZGEMM trans flags rather than numpy's conj-transpose copies.
+        O = zgemm(1.0, D, D, trans_b=2)        # ZGEMM('N','C'): D @ D^H
         S = _sqrt_inv(O)
-        D_orth = S @ D
+        D_orth = zgemm(1.0, S, D)             # ZGEMM('N','N'): O^{-1/2} @ D
         row = 0
-        for icr, ispin, nrows in layout:
-            mat_rep[(icr, ik, ispin)] = D_orth[row:row + nrows, :]
+        for key, nrows in layout:
+            mat_rep[key] = D_orth[row:row + nrows, :]
             row += nrows
 
     # ---- Rloc rotrep per crorb ----
@@ -567,8 +317,12 @@ def write_ctqmcout(case):
         l = cr['l']
         transmat = transmats[(l, cr['sort'])]
         iref = sum(info['mult'][:cr['sort'] - 1]) + 1
-        op = next(o for o in ops if o['perm'][iref - 1] == cr['atom'])
-        rloc_blocks.append(_rloc_rotrep(op, l, transmat))
+        if mixing[(l, cr['sort'])]:
+            rloc_blocks.append(_rloc_rotrep_mixing(
+                l, rotloc_ref[cr['sort'] - 1], ops, cr['atom'], iref, transmat))
+        else:
+            op = next(o for o in ops if o['perm'][iref - 1] == cr['atom'])
+            rloc_blocks.append(_rloc_rotrep(op, l, transmat))
 
     # ---- write ----
     with open(case + '.ctqmcout', 'w') as f:
@@ -576,8 +330,8 @@ def write_ctqmcout(case):
         f.write('%6d\n' % nk)
         f.write('%6d\n' % (1 if ifSP else 0))
         f.write('%6d\n' % (1 if ifSO else 0))
-        f.write(' %s\n' % _fmt_scalar(qbbot))
-        f.write(' %s\n' % _fmt_scalar(elecn))
+        f.write(' %s\n' % fmt_scalar(qbbot))
+        f.write(' %s\n' % fmt_scalar(elecn))
 
         f.write('%6d\n' % norb)
         for o in orbs:
@@ -594,26 +348,30 @@ def write_ctqmcout(case):
         # Rloc block per crorb (non-mixing SP+SO whole shell)
         for rotrep, timeinv in rloc_blocks:
             for m in range(rotrep.shape[0]):
-                _w(f, rotrep[m, :].real)
+                write_row(f, rotrep[m, :].real)
             for m in range(rotrep.shape[0]):
-                _w(f, rotrep[m, :].imag)
+                write_row(f, rotrep[m, :].imag)
             f.write('%6d\n' % (1 if timeinv else 0))
 
-        # complex-harmonics -> basis transform block (crorb%first only)
+        # complex-harmonics -> basis transform block (crorb%first only). Mixing
+        # writes the full 2(2l+1) transmat; non-mixing the spin block-diagonal.
         for cr in crorbs:
             if not cr['first']:
                 continue
             l = cr['l']
             transmat = transmats[(l, cr['sort'])]
             d = 2 * l + 1
-            spinrot = np.zeros((2 * d, 2 * d), dtype=complex)
-            spinrot[:d, :d] = transmat
-            spinrot[d:, d:] = transmat
+            if mixing[(l, cr['sort'])]:
+                spinrot = transmat
+            else:
+                spinrot = np.zeros((2 * d, 2 * d), dtype=complex)
+                spinrot[:d, :d] = transmat
+                spinrot[d:, d:] = transmat
             f.write('%6d %6d \n' % (1, 2 * d))
             for m in range(2 * d):
-                _w(f, spinrot[m, :].real)
+                write_row(f, spinrot[m, :].real)
             for m in range(2 * d):
-                _w(f, spinrot[m, :].imag)
+                write_row(f, spinrot[m, :].imag)
 
         # number of bands per k (skip is=2 under SO)
         for ispin in range(ns):
@@ -623,22 +381,30 @@ def write_ctqmcout(case):
                 incl, nb_bot, nb_top = windows[ik]
                 f.write('%6d\n' % abs(nb_top - nb_bot + 1))
 
-        # projector block: DO ik, DO icrorb (non-mixing SO whole-shell)
+        # projector block: DO ik, DO icrorb. Mixing writes the full 2(2l+1)
+        # block from is=1; non-mixing the two (2l+1) spin blocks.
         for ik in range(nk):
             for icr, cr in enumerate(crorbs):
                 l = cr['l']
+                if mixing[(l, cr['sort'])]:
+                    P = mat_rep[(icr, ik)]
+                    for m in range(2 * (2 * l + 1)):
+                        write_row(f, P[m, :].real)
+                    for m in range(2 * (2 * l + 1)):
+                        write_row(f, P[m, :].imag)
+                    continue
                 for ispin in range(ns):
                     P = mat_rep[(icr, ik, ispin)]
                     for mi in range(2 * l + 1):
-                        _w(f, P[mi, :].real)
+                        write_row(f, P[mi, :].real)
                 for ispin in range(ns):
                     P = mat_rep[(icr, ik, ispin)]
                     for mi in range(2 * l + 1):
-                        _w(f, P[mi, :].imag)
+                        write_row(f, P[mi, :].imag)
 
         # k-weights
         for ik in range(nk):
-            f.write(' %s\n' % _fmt_scalar(spins[0]['kp'][ik]['weight']))
+            f.write(' %s\n' % fmt_scalar(spins[0]['kp'][ik]['weight']))
 
         # H(k) eigenvalues (skip is=2 under SO)
         for ispin in range(ns):
@@ -648,4 +414,4 @@ def write_ctqmcout(case):
                 incl, nb_bot, nb_top = windows[ik]
                 kp = spins[ispin]['kp'][ik]
                 for ib in range(nb_bot, nb_top + 1):
-                    f.write(' %s\n' % _fmt_scalar(kp['eband'][ib - kp['nbmin']]))
+                    f.write(' %s\n' % fmt_scalar(kp['eband'][ib - kp['nbmin']]))
