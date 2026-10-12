@@ -134,6 +134,7 @@ def _read_indmftpr(indmftpr):
     mult = [int(x) for x in raw[1].split()][:nsort]
     i = 3
     so = 0
+    seen_correlated = False
     shells = []
     for isort in range(nsort):
         basis = raw[i].split()[0]
@@ -146,10 +147,19 @@ def _read_indmftpr(indmftpr):
         i += 1
         correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
         included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        if any(n > 0 for n in ireps):
-            i += 1                          # skip the correps line
+        for l in correlated_ls:
+            if ireps[l] > 1 or (ireps[l] == 1 and raw[i].strip() != '1'):
+                raise NotImplementedError('selection of individual irreducible representations is not implemented')
+            if ireps[l] > 0:
+                i += 1
         if correlated_ls:
-            so = int(raw[i].split()[0])     # SO flag follows a correlated sort
+            sort_so = int(raw[i].split()[0])
+            if sort_so not in (0, 1):
+                raise ValueError('spin-orbit flags must be 0 or 1')
+            if seen_correlated and sort_so != so:
+                raise NotImplementedError('different spin-orbit flags across correlated sorts are not implemented')
+            so = sort_so
+            seen_correlated = True
             i += 1
         for l in included_ls:
             P = _reptrans(basis, l)
