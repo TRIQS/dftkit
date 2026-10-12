@@ -78,4 +78,11 @@ np.testing.assert_allclose(p @ p.conj().T, np.eye(3), atol=1e-7, rtol=0)
 
 _check('CaOs2_partial')
 
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, 'multi.indmftpr')
+    with open(path, 'w') as fh:
+        fh.write('1\n1\n2\ncomplex\n0 2 2\n0 1 1\n1\n1\n1\n-2 3\n')
+    shells, so = sympar._read_indmftpr(path)
+    assert so == 1 and [shell['l'] for shell in shells] == [1, 2]
+
 print('wien2k_sympar_python: ok')
