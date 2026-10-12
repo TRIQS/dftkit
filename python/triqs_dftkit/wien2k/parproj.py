@@ -200,10 +200,18 @@ def _read_indmftpr(indmftpr):
         i += 1
         correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
         included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        if any(n > 0 for n in ireps):
-            i += 1
+        for l in correlated_ls:
+            if ireps[l] > 1 or (ireps[l] == 1 and raw[i].strip() != '1'):
+                raise NotImplementedError('selection of individual irreducible representations is not implemented')
+            if ireps[l] > 0:
+                i += 1
         if correlated_ls:
-            so = int(raw[i].split()[0])
+            sort_so = int(raw[i].split()[0])
+            if sort_so not in (0, 1):
+                raise ValueError('spin-orbit flags must be 0 or 1')
+            if any(s['correlated_ls'] for s in sorts) and sort_so != so:
+                raise NotImplementedError('different spin-orbit flags across correlated sorts are not implemented')
+            so = sort_so
             i += 1
         sorts.append(dict(basis=basis, correlated_ls=correlated_ls,
                           included_ls=included_ls))
@@ -236,7 +244,7 @@ def _read_dmftsym(path):
     gl = next(i for i, l in enumerate(lines) if 'Global->local' in l)
     rotloc_ref = []
     j = gl + 1
-    while len(rotloc_ref) < nsym and j < len(lines):
+    while j < len(lines):
         if lines[j].strip() == '' or not lines[j].split()[0].lstrip('-').isdigit():
             j += 1
             continue
@@ -283,6 +291,8 @@ def _read_almblm(path, info):
         for l in range(lmax + 1):
             u_dot_norm[(l, isrt)] = _to_float(r.record()[0])
             n = int(r.record()[0])
+            if n > 1:
+                raise NotImplementedError('more than one local orbital per angular momentum is not implemented')
             nLO[(l, isrt)] = n
             nloat_max = max(nloat_max, n)
             for ilo in range(1, n + 1):
