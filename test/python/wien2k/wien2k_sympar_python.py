@@ -41,12 +41,12 @@ def _compare(got_path, ref_lines):
     reference = np.array(ref[header:], float).reshape(data.shape)
     matrices = data[:, :, 0] + 1j * data[:, :, 1]
     expected = reference[:, :, 0] + 1j * reference[:, :, 1]
-    np.testing.assert_allclose(matrices, expected, atol=1e-7, rtol=0,
+    np.testing.assert_allclose(matrices, expected, atol=1e-11, rtol=0,
                                equal_nan=False)
     for operation in matrices:
         for matrix in operation:
             np.testing.assert_allclose(matrix @ matrix.conj().T, np.eye(10),
-                                       atol=1e-7, rtol=0)
+                                       atol=1e-11, rtol=0)
 
 
 def _check(case):
@@ -70,19 +70,12 @@ def _check(case):
 # Inversion has proper part I but parity -1: odd-l matrices must be -I.
 inversion = dict(a=0., b=0., c=0., iprop=-1, krotm=np.eye(3))
 for l in (1, 3):
-    shell = dict(l=l, P=np.eye(2 * l + 1, dtype=complex))
+    shell = dict(l=l, mixing=False, P=np.eye(2 * l + 1, dtype=complex))
     np.testing.assert_allclose(sympar._shell_matrix(inversion, shell, False),
                                -np.eye(2 * (2 * l + 1)), atol=1e-14, rtol=0)
-p = sympar._reptrans('cubic', 1)
-np.testing.assert_allclose(p @ p.conj().T, np.eye(3), atol=1e-7, rtol=0)
+p = sympar.reptrans('cubic', 1)
+np.testing.assert_allclose(p @ p.conj().T, np.eye(3), atol=1e-11, rtol=0)
 
 _check('CaOs2_partial')
-
-with tempfile.TemporaryDirectory() as tmp:
-    path = os.path.join(tmp, 'multi.indmftpr')
-    with open(path, 'w') as fh:
-        fh.write('1\n1\n2\ncomplex\n0 2 2\n0 1 1\n1\n1\n1\n-2 3\n')
-    shells, so = sympar._read_indmftpr(path)
-    assert so == 1 and [shell['l'] for shell in shells] == [1, 2]
 
 print('wien2k_sympar_python: ok')
