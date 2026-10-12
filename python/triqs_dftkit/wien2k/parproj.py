@@ -58,9 +58,9 @@ import math
 import os
 import numpy as np
 
-from ._dmftproj import (require_identity_struct, validate_so_windows, dmat, mixing_rotrep, read_almblm, read_dmftsym,
+from ._dmftproj import (require_identity_struct, validate_so_windows, band_index_window, dmat, mixing_rotrep, read_almblm, read_dmftsym,
                         read_fromfile, read_indmftpr, reptrans,
-                        rotloc_rotl_so, select_window, tmat, write_row)
+                        rotloc_rotl_so, select_band_window, select_window, tmat, write_row)
 
 
 def _op_timeinv(op, ifSO):
@@ -396,8 +396,6 @@ def write_parproj(case):
     if not info['so']:
         raise NotImplementedError('non-spin-orbit projectors are not implemented yet')
     require_identity_struct(case)
-    if info['proj_mode'] != 0:
-        raise NotImplementedError('this output currently supports projection mode 0')
     nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
 
     up, dn = case + '.almblmup', case + '.almblmdn'
@@ -423,12 +421,17 @@ def write_parproj(case):
     # density call is correlated-only), so densmat in outputqmc is that one.
     windows = []
     below_windows = []
+    bw = band_index_window(info, spins) if info['proj_mode'] else None
     for ik in range(nk):
         kp = spins[0]['kp'][ik]
-        windows.append(select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
-                                      info['e_bot'], info['e_top']))
-        below_windows.append(select_window(kp['nbmin'], kp['nbmax'],
-                                            kp['eband'], -1e6, info['e_bot']))
+        if bw is None:
+            windows.append(select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
+                                          info['e_bot'], info['e_top']))
+            below_windows.append(select_window(kp['nbmin'], kp['nbmax'],
+                                                kp['eband'], -1e6, info['e_bot']))
+        else:
+            windows.append(select_band_window(kp['nbmin'], kp['nbmax'], *bw))
+            below_windows.append(select_band_window(kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
 
     validate_so_windows(spins, info, windows, below_windows)
 

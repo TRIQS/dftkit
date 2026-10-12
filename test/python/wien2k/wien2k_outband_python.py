@@ -80,6 +80,15 @@ def _check(case):
         outband.write_outband(os.path.join(tmp, case))
         with gzip.open(os.path.join(HERE, f'{case}.outband.gz'), 'rt') as fh:
             _compare(os.path.join(tmp, f'{case}.outband'), fh.readlines())
+        with open(os.path.join(tmp, f'{case}.klist_band'), 'w') as fh:
+            fh.write('GAMMA            0    0    0    8  2.0\nX                4    0    0    8  2.0\nEND\n')
+        assert outband.read_k_list(os.path.join(tmp, f'{case}.klist_band')) == (2, [(1, 'GAMMA'), (2, 'X')])
+        try:
+            outband.write_outband(os.path.join(tmp, case))
+        except ValueError as exc:
+            assert 'k-point counts differ' in str(exc)
+        else:
+            raise AssertionError('inconsistent band-path dimensions must be rejected')
     finally:
         shutil.rmtree(tmp)
 

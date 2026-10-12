@@ -139,6 +139,8 @@ def write_outband(case):
     info['nk'] = nk
 
     nkband, labels = read_k_list(case + '.klist_band')
+    if nkband != nk:
+        raise ValueError('klist_band and almblm k-point counts differ')
 
     crorbs = _build_crorbs(info)
     orbs = _build_orbs(info)

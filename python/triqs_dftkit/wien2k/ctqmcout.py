@@ -80,7 +80,7 @@ def _sqrt_inv(O):
     w, Z, info = zheev(O, compute_v=1, lower=0)   # 'V', 'U'
     if info != 0:
         raise np.linalg.LinAlgError(f'Loewdin eigensolver failed (info={info})')
-    if w[0] <= np.finfo(float).eps * len(w) * max(abs(w[-1]), 1.):
+    if w[0] <= np.finfo(float).eps * len(w) * abs(w[-1]):
         raise ValueError('Loewdin overlap is rank deficient; widen the projection window')
     D1 = Z * (w.astype(complex) ** -0.5)          # Z @ diag(w^{-1/2})
     return zgemm(1.0, D1, np.conj(Z), trans_b=1)  # ZGEMM('N','T'): D1 @ conj(Z)^T
@@ -205,7 +205,7 @@ def write_ctqmcout(case):
             win_below.append(select_band_window(
                 kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
 
-    validate_so_windows(spins, info, windows)
+    validate_so_windows(spins, info, windows, win_below)
 
     # qbbot: point integration over bands below e_bot, is=1 only under SO
     qbbot = 0.0
