@@ -77,4 +77,23 @@ assert ctqmcout._select_window(10, 13, [-3., -2., -1., 0.5], 0., 1.) == (False, 
 assert ctqmcout._select_window(5, 5, [0.5], 0., 1.) == (False, 0, 0)
 _check('CaOs2')
 
+for scale in (1., 1e-20):
+    overlap = np.diag([scale, 2 * scale]).astype(complex)
+    inverse = ctqmcout._sqrt_inv(overlap)
+    np.testing.assert_allclose(inverse @ overlap @ inverse.conj().T,
+                               np.eye(2), atol=1e-14, rtol=0)
+try:
+    ctqmcout._sqrt_inv(np.diag([0., 1.]).astype(complex))
+except ValueError as error:
+    assert 'rank deficient' in str(error)
+else:
+    raise AssertionError('singular overlap was accepted')
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, 'multi.indmftpr')
+    with open(path, 'w') as fh:
+        fh.write('1\n1\n2\ncomplex\n0 2 2\n0 1 1\n1\n1\n1\n-2 3\n')
+    parsed = ctqmcout._read_indmftpr(path)
+    assert parsed['so'] == 1 and parsed['sorts'][0]['correlated_ls'] == [1, 2]
+
 print('wien2k_ctqmcout_python: ok')
