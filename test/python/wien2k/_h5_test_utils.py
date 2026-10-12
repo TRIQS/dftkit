@@ -20,6 +20,7 @@ def assert_h5_close(actual_path, expected_path, atol=1e-12):
             if np.issubdtype(dtype, np.integer) or dtype.kind in 'OUS':
                 np.testing.assert_array_equal(actual, expected, err_msg=path)
             else:
+                assert np.isfinite(actual).all() and np.isfinite(expected).all(), path
                 np.testing.assert_allclose(actual, expected, atol=atol, rtol=0,
                                            equal_nan=False, err_msg=path)
         else:

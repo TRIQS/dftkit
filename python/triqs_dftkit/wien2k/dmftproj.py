@@ -19,7 +19,7 @@
 #
 ################################################################################
 
-"""Pure-Python drop-in for the dmftproj Fortran executable.
+"""Pure-Python driver for the dmftproj file interface.
 
 `run_dmftproj(case)` reads the Wien2k projector inputs (case.almblm{up,dn},
 case.indmftpr, case.struct, case.dmftsym) and writes every case.* file the
@@ -32,6 +32,12 @@ dmftproj.
 
 Run as a script (`python -m triqs_dftkit.wien2k.dmftproj -sp -so [-band]`) it
 mimics the Fortran binary: the case name is the working-directory basename.
+
+Unsupported inputs raise explicitly: selected irreducible subspaces, cubic f
+harmonics, multiple local orbitals per angular momentum, spin-mixing bases
+without SO, differing SO flags across correlated sorts, and non-SO band paths.
+Band paths currently require projection mode 0. Two-spin projector generation
+requires matching selected and below-window bands in both spin channels.
 """
 
 import os
