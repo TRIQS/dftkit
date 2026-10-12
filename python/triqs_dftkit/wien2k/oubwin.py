@@ -112,6 +112,7 @@ def _read_so_flag(indmftpr):
     nsort = int(raw[0].split()[0])
     i = 3
     so = 0
+    seen_correlated = False
     for _ in range(nsort):
         basis = raw[i].split()[0]
         i += 1
@@ -122,10 +123,17 @@ def _read_so_flag(indmftpr):
         ireps = [int(x) for x in raw[i].split()]
         i += 1
         correlated = any(v == 2 for v in l_inc)
-        if any(n > 0 for n in ireps):
-            i += 1
+        for l, included in enumerate(l_inc):
+            if included == 2 and ireps[l] > 0:
+                i += 1
         if correlated:
-            so = int(raw[i].split()[0])
+            sort_so = int(raw[i].split()[0])
+            if sort_so not in (0, 1):
+                raise ValueError('spin-orbit flags must be 0 or 1')
+            if seen_correlated and sort_so != so:
+                raise NotImplementedError('different spin-orbit flags across correlated sorts are not implemented')
+            so = sort_so
+            seen_correlated = True
             i += 1
     return so
 

@@ -94,4 +94,10 @@ IK = 3
 
 _check('CaOs2')
 
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, 'multi.indmftpr')
+    with open(path, 'w') as fh:
+        fh.write('1\n1\n2\ncomplex\n0 2 2\n0 1 1\n1\n1\n0\n-2 3\n')
+    assert oubwin._read_so_flag(path) == 0
+
 print('wien2k_oubwin_python: ok')
