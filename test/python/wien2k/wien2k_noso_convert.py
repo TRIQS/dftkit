@@ -5,7 +5,7 @@
 
 # End-to-end non-spin-orbit converter test. The Python dmftproj driver writes
 # every case.* file, the Wien2k converter ingests them, and the HDF5 is compared
-# at machine precision (1e-12) against the reference built from the Fortran
+# recursively at 1e-12 against the reference built from the Fortran
 # dmftproj output. Beyond the SO converter test, this exercises convert_dft_input
 # on the non-SO path (SP=1, SO=0: the .oubwinup/.oubwindn band windows) and
 # convert_parproj_input (case.parproj + case.sympar) end to end.

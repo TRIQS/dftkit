@@ -5,7 +5,7 @@
 
 # End-to-end spin-orbit converter test at machine precision: the Python driver
 # writes every case.* file, the Wien2k converter ingests them, and the HDF5 is
-# h5diffed against the Fortran-derived reference at 1e-12. The Loewdin overlap
+# compared recursively against the Fortran-derived reference at 1e-12. The Loewdin overlap
 # must be full rank; the physical narrow window is rank-deficient (the overlap
 # has near-null eigenvalues whose eigenvectors are not unique across LAPACK
 # builds), so this test uses the wide window -2..3. The narrow physical case is

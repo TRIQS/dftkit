@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 
+from triqs_dftkit.wien2k import Driver
+
 
 here = Path(__file__).resolve().parent
 wrapper = Path(sys.argv[1]).resolve()
@@ -33,5 +35,17 @@ with tempfile.TemporaryDirectory() as tmp:
                    'oubwinup', 'oubwindn'):
         output = case_dir / f'{case}.{suffix}'
         assert output.is_file() and output.stat().st_size > 0, output
+
+    # The CSC workflow uses the Python API directly by default. A dummy WIENROOT
+    # is enough here because this focused call must not launch the x script.
+    wienroot = case_dir / 'wienroot'
+    wienroot.mkdir()
+    (wienroot / 'x').write_text('must not be executed\n')
+    previous_cwd = Path.cwd()
+    try:
+        os.chdir(case_dir)
+        Driver(case, wienroot=str(wienroot))._run_dmftproj()
+    finally:
+        os.chdir(previous_cwd)
 
 print('wien2k_dmftproj_cli: ok')
