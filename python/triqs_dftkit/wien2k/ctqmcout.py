@@ -178,6 +178,8 @@ def _sqrt_inv(O):
     eigenvalue contributes i/sqrt(|w|) rather than NaN; reproduce that with a
     complex power. The final result D1 @ conj(Z).T matches sqrtm exactly."""
     w, Z = np.linalg.eigh(O)
+    if w[0] <= np.finfo(float).eps * len(w) * abs(w[-1]):
+        raise ValueError('Loewdin overlap is rank deficient; widen the projection window')
     D1 = Z * (w.astype(complex) ** -0.5)        # Z @ diag(w^{-1/2})
     return D1 @ np.conj(Z).T
 
@@ -204,10 +206,18 @@ def _read_indmftpr(indmftpr):
         i += 1
         correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
         included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        if any(n > 0 for n in ireps):
-            i += 1
+        for l in correlated_ls:
+            if ireps[l] > 1 or (ireps[l] == 1 and raw[i].strip() != '1'):
+                raise NotImplementedError('selection of individual irreducible representations is not implemented')
+            if ireps[l] > 0:
+                i += 1
         if correlated_ls:
-            so = int(raw[i].split()[0])
+            sort_so = int(raw[i].split()[0])
+            if sort_so not in (0, 1):
+                raise ValueError('spin-orbit flags must be 0 or 1')
+            if any(s['correlated_ls'] for s in sorts) and sort_so != so:
+                raise NotImplementedError('different spin-orbit flags across correlated sorts are not implemented')
+            so = sort_so
             i += 1
         sorts.append(dict(basis=basis, correlated_ls=correlated_ls,
                           included_ls=included_ls))
@@ -258,6 +268,8 @@ def _read_almblm(path, info):
         for l in range(lmax + 1):
             r.record()                 # u_dot_norm(l)
             n = int(r.record()[0])
+            if n > 1:
+                raise NotImplementedError('more than one local orbital per angular momentum is not implemented')
             nLO[(l, isrt)] = n
             for ilo in range(1, n + 1):
                 toks = r.record()
@@ -462,6 +474,12 @@ def write_ctqmcout(case):
         kp = spins[0]['kp'][ik]
         win_below.append(_select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
                                        -1e6, info['e_bot']))
+
+    for spin in spins[1:]:
+        for ik, kp in enumerate(spin['kp']):
+            lower = _select_window(kp['nbmin'], kp['nbmax'], kp['eband'], -1e6, info['e_bot'])
+            if lower != win_below[ik]:
+                raise ValueError('spin-orbit run requires identical up/dn below-window bands')
 
     # qbbot: point integration over bands below e_bot, is=1 only under SO
     qbbot = 0.0
