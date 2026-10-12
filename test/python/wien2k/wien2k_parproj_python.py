@@ -72,4 +72,15 @@ for shell in raw:
 
 _check('CaOs2_partial')
 
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, 'P1.dmftsym')
+    with open(path, 'w') as fh:
+        fh.write('1\n1 2\nSym. op. 1\n0 0 0 1\n'
+                 '1 0 0\n0 1 0\n0 0 1\nGlobal->local\n'
+                 '1\n1 0 0\n0 1 0\n0 0 1\n0 0 0 1\n'
+                 '2\n1 0 0\n0 1 0\n0 0 1\n90 0 0 1\n')
+    _, _, refs = parproj._read_dmftsym(path)
+    assert len(refs) == 2
+    np.testing.assert_allclose(refs[1]['a'], np.pi / 2, atol=1e-14, rtol=0)
+
 print('wien2k_parproj_python: ok')
