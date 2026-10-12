@@ -116,6 +116,8 @@ def _nonmixing_orbital(op, shell):
 
 
 def _shell_matrix(op, shell, ti, ifSO):
+    if shell['mixing'] and not ifSO:
+        raise NotImplementedError('spin-mixing bases without spin-orbit coupling are not implemented')
     l = shell['l']
     if l == 0:
         return _l0_matrix(op, ti)

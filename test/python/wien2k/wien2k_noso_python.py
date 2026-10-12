@@ -94,4 +94,34 @@ for shell in raw:
     for actual, expected in zip(result[shell], raw[shell]):
         np.testing.assert_allclose(actual, expected, atol=1e-14, rtol=0)
 
+# SO metadata requires both spin channels, including when a single-channel
+# almblm happens to be present. Never export a half-sized SO projector.
+tmp = _stage('CaOs2_noso')
+try:
+    case = os.path.join(tmp, 'CaOs2_noso')
+    os.rename(case + '.almblmup', case + '.almblm')
+    os.unlink(case + '.almblmdn')
+    with open(case + '.indmftpr') as fh:
+        lines = fh.read().splitlines()
+    lines[-2] = '1'
+    with open(case + '.indmftpr', 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    for writer in (ctqmcout.write_ctqmcout, parproj.write_parproj):
+        try:
+            writer(case)
+        except ValueError as error:
+            assert 'both up and down' in str(error)
+        else:
+            raise AssertionError('single-channel SO projectors were accepted')
+finally:
+    shutil.rmtree(tmp)
+
+for module in (symqmc, sympar):
+    try:
+        module._shell_matrix({}, dict(l=1, mixing=True, P=np.eye(6)), 0, False)
+    except NotImplementedError as error:
+        assert 'spin-mixing' in str(error)
+    else:
+        raise AssertionError('non-SO symmetry accepted a spinor basis')
+
 print('wien2k_noso_python: ok')

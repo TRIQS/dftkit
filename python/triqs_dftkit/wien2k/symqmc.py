@@ -138,6 +138,8 @@ def _shell_matrix(op, shell, ti, ifSO):
     """Symmetry matrix for one correlated shell under one operation: the
     2*(2l+1) block-diag spinor representation under SO, the bare (2l+1)
     representation otherwise."""
+    if shell['mixing'] and not ifSO:
+        raise NotImplementedError('spin-mixing bases without spin-orbit coupling are not implemented')
     l = shell['l']
     if l == 0:
         return _l0_matrix(op, ti) if ifSO else np.array([[1.0 + 0j]], dtype=complex)
