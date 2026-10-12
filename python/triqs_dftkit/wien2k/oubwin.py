@@ -85,7 +85,8 @@ def _read_window(indmftpr):
 
     Try list-directed `e_bot e_top proj_mode`; on failure fall back to
     `e_bot e_top` with proj_mode=0 (dmftproj.f:182-197)."""
-    lines = [l for l in open(indmftpr).read().splitlines() if l.strip()]
+    lines = [l.split('!')[0].strip() for l in open(indmftpr)]
+    lines = [l for l in lines if l]
     toks = lines[-1].split()
     e_bot, e_top = _to_float(toks[0]), _to_float(toks[1])
     proj_mode = int(toks[2]) if len(toks) >= 3 else 0

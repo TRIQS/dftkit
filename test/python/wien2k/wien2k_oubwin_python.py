@@ -99,5 +99,8 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(path, 'w') as fh:
         fh.write('1\n1\n2\ncomplex\n0 2 2\n0 1 1\n1\n1\n0\n-2 3\n')
     assert oubwin._read_so_flag(path) == 0
+    with open(path, 'a') as fh:
+        fh.write('-2 3 ! default energy-window mode\n')
+    assert oubwin._read_window(path) == (-2., 3., 0)
 
 print('wien2k_oubwin_python: ok')
