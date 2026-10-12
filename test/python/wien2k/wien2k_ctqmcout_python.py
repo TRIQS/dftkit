@@ -90,3 +90,11 @@ except ValueError as error:
     assert 'rank deficient' in str(error)
 else:
     raise AssertionError('singular overlap was accepted')
+
+# Rank is invariant under a uniform projector scaling. Small, well-conditioned
+# overlaps must remain valid and normalize to the identity.
+for scale in (1., 1e-20):
+    overlap = np.diag([scale, 2 * scale]).astype(complex)
+    inverse_root = ctqmcout._sqrt_inv(overlap)
+    np.testing.assert_allclose(inverse_root @ overlap @ inverse_root.conj().T,
+                               np.eye(2), atol=1e-14, rtol=0)

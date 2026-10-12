@@ -109,4 +109,60 @@ nsym, ops = dp.read_dmftsym(os.path.join(HERE, 'CaOs2.dmftsym'))
 assert nsym == 16 and len(ops) == 16
 assert all(o['krotm'].shape == (3, 3) and len(o['perm']) == 3 for o in ops)
 
+# Atomic sorts and symmetry operations are independent counts (P1 can have
+# many inequivalent atoms but only the identity operation).
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, 'P1.dmftsym')
+    with open(path, 'w') as fh:
+        fh.write('1\n1 2\nSym. op. 1\n0 0 0 1\n'
+                 '1 0 0\n0 1 0\n0 0 1\nGlobal->local\n'
+                 '1\n1 0 0\n0 1 0\n0 0 1\n0 0 0 1\n'
+                 '2\n1 0 0\n0 1 0\n0 0 1\n90 0 0 1\n')
+    _, _, refs = dp.read_dmftsym(path, rotloc=True)
+    assert len(refs) == 2
+    np.testing.assert_allclose(refs[1]['a'], np.pi / 2, atol=1e-14, rtol=0)
+
+    # A tiny but nonzero spin coupling must retain the full spinor basis.
+    theta = 1e-9
+    basis = np.eye(6)
+    basis[0, 0] = basis[3, 3] = np.cos(theta)
+    basis[0, 3], basis[3, 0] = np.sin(theta), -np.sin(theta)
+    path = os.path.join(tmp, 'basis.dat')
+    with open(path, 'w') as fh:
+        for row in basis:
+            fh.write(' ' + ' '.join(f'{value:.17E} 0' for value in row).replace('E', 'D') + '\n')
+    transform, mixing = dp.read_fromfile(path, 1)
+    assert mixing and transform.shape == (6, 6)
+    np.testing.assert_array_equal(transform, basis.conjugate())
+
+    # Each correlated l with an explicit irep owns its own correps record.
+    path = os.path.join(tmp, 'multi.indmftpr')
+    with open(path, 'w') as fh:
+        fh.write('1\n1\n2\ncomplex\n0 2 2\n0 1 1\n1\n1\n1\n-2 3\n')
+    parsed = dp.read_indmftpr(path)
+    assert parsed['so'] == 1 and parsed['sorts'][0]['correlated_ls'] == [1, 2]
+
+    # Selecting individual irreps is not implemented: do not silently export
+    # the entire shell in place of the requested correlated subspace.
+    with open(path, 'w') as fh:
+        fh.write('1\n1\n2\ncubic\n0 0 2\n0 0 2\n10\n1\n-2 3\n')
+    try:
+        dp.read_indmftpr(path)
+    except NotImplementedError as error:
+        assert 'irreducible' in str(error)
+    else:
+        raise AssertionError('split correlated shell was silently accepted')
+
+    # The input lacks the cross overlaps needed for two local orbitals;
+    # the native implementation rejects this case as well.
+    path = os.path.join(tmp, 'multi.almblm')
+    with open(path, 'w') as fh:
+        fh.write('1\n1\n2\n0\n1\n2\n')
+    try:
+        dp.read_almblm(path, dict(nsort=1, lmax=0, mult=[1]))
+    except NotImplementedError as error:
+        assert 'local orbital' in str(error)
+    else:
+        raise AssertionError('multiple local orbitals were silently accepted')
+
 print('wien2k_dmftproj_common: ok')

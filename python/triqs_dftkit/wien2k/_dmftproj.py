@@ -141,16 +141,20 @@ def read_fromfile(path, l):
         if not line.strip():
             continue
         body = line[1:]
-        vals = [float(x) for x in body.split()][:2 * n]
+        vals = [to_float(x) for x in body.split()[:2 * n]]
+        if len(vals) != 2 * n:
+            raise ValueError(f'{path}: each basis row requires {2 * n} real coefficients')
         rows.append([vals[2 * k] + 1j * vals[2 * k + 1] for k in range(n)])
         if len(rows) == n:
             break
     R = np.array(rows)                       # R[i, :] = |new_i> in old basis
+    if R.shape != (n, n) or not np.all(np.isfinite(R)):
+        raise ValueError(f'{path}: expected a finite {n} by {n} basis matrix')
     d = 2 * l + 1
     up_up, up_dn = R[:d, :d], R[:d, d:]
     dn_up, dn_dn = R[d:, :d], R[d:, d:]
-    mixing = not (np.allclose(dn_dn, up_up) and
-                  np.allclose(up_dn, 0) and np.allclose(dn_up, 0))
+    mixing = not (np.array_equal(dn_dn, up_up) and
+                  np.all(up_dn == 0) and np.all(dn_up == 0))
     P = np.conj(R) if mixing else np.conj(up_up)   # <new|m> = conj(<m|new>)
     return P, mixing
 
@@ -302,16 +306,28 @@ def read_indmftpr(indmftpr):
         i += 1
         correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
         included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        if any(n > 0 for n in ireps):
-            i += 1                       # skip the correps line
+        for l in correlated_ls:
+            if ireps[l] > 1:
+                raise NotImplementedError('selection of individual irreducible representations is not implemented')
+            if ireps[l] > 0:
+                if raw[i].strip() != '1':
+                    raise NotImplementedError('selection of individual irreducible representations is not implemented')
+                i += 1                   # each correlated l has its own correps line
         if correlated_ls:
-            so = int(raw[i].split()[0])  # SO flag follows a correlated sort
+            sort_so = int(raw[i].split()[0])
+            if sort_so not in (0, 1):
+                raise ValueError('spin-orbit flags must be 0 or 1')
+            if any(s['correlated_ls'] for s in sorts) and sort_so != so:
+                raise NotImplementedError('different spin-orbit flags across correlated sorts are not implemented')
+            so = sort_so                 # SO flag follows a correlated sort
             i += 1
         sorts.append(dict(basis=basis, sourcefile=sourcefile,
                           correlated_ls=correlated_ls, included_ls=included_ls))
     last = raw[-1].split()
     e_bot, e_top = to_float(last[0]), to_float(last[1])
     proj_mode = int(last[2]) if len(last) >= 3 else 0
+    if proj_mode not in (0, 1, 2) or not np.isfinite([e_bot, e_top]).all() or e_bot > e_top:
+        raise ValueError('projection window requires finite ordered bounds and mode 0, 1 or 2')
     return dict(nsort=nsort, mult=mult, lmax=lmax, sorts=sorts, so=so,
                 e_bot=e_bot, e_top=e_top, proj_mode=proj_mode)
 
@@ -343,7 +359,7 @@ def read_dmftsym(path, rotloc=False):
     gl = next(i for i, l in enumerate(lines) if 'Global->local' in l)
     rotloc_ref = []
     j = gl + 1
-    while len(rotloc_ref) < nsym and j < len(lines):
+    while j < len(lines):
         if lines[j].strip() == '' or not lines[j].split()[0].lstrip('-').isdigit():
             j += 1
             continue
@@ -397,6 +413,8 @@ def read_almblm(path, info, projectors=False):
         for l in range(lmax + 1):
             u_dot_norm[(l, isrt)] = to_float(r.record()[0])
             n = int(r.record()[0])
+            if n > 1:
+                raise NotImplementedError('more than one local orbital per angular momentum is not implemented')
             nLO[(l, isrt)] = n
             for ilo in range(1, n + 1):
                 toks = r.record()
@@ -553,7 +571,8 @@ def validate_so_windows(spins, info, windows, below=None):
             if selected != windows[ik]:
                 raise ValueError('spin-orbit run requires identical up/dn band windows')
             if below is not None:
-                lower = select_window(kp['nbmin'], kp['nbmax'], kp['eband'], -1e6, info['e_bot'])
+                lower = (select_window(kp['nbmin'], kp['nbmax'], kp['eband'], -1e6, info['e_bot'])
+                         if bw is None else select_band_window(kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
                 if lower != below[ik]:
                     raise ValueError('spin-orbit run requires identical up/dn below-window bands')
     if not all(incl and lo <= hi for incl, lo, hi in windows):

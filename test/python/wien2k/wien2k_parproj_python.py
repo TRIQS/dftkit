@@ -41,11 +41,18 @@ def _compare(got_path, ref_lines):
     np.testing.assert_allclose(a, b, atol=1e-11, rtol=0, equal_nan=False)
 
 
-def _check(case):
+def _check(case, mode=0):
     tmp = tempfile.mkdtemp()
     try:
         shutil.copy(os.path.join(HERE, f'{case}.indmftpr'),
                     os.path.join(tmp, f'{case}.indmftpr'))
+        if mode:
+            path = os.path.join(tmp, f'{case}.indmftpr')
+            with open(path) as fh:
+                lines = fh.read().splitlines()
+            lines[-1] = lines[-1] + ' 1' if mode == 1 else '60 76 2'
+            with open(path, 'w') as fh:
+                fh.write('\n'.join(lines) + '\n')
         shutil.copy(os.path.join(HERE, 'jbasis_d.dat'), os.path.join(tmp, 'jbasis_d.dat'))
         for ext in ('struct', 'dmftsym'):
             shutil.copy(os.path.join(HERE, f'CaOs2.{ext}'),
@@ -73,6 +80,10 @@ for shell in raw:
 
 _check('CaOs2_partial')
 _check('CaOs2_jbasis_full')
+# All definitions select bands 60..76 here; the partial projectors and
+# below-window density must match the native energy-window reference.
+_check('CaOs2_partial', mode=1)
+_check('CaOs2_partial', mode=2)
 
 print('wien2k_parproj_python: ok')
 
