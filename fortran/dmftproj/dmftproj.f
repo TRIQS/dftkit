@@ -649,7 +649,7 @@ C kp(ik,is)%nbmzx = index of the uppest band
               ENDIF
               DO ib=kp(ik,is)%nbmin,kp(ik,is)%nbmax
                 READ(iualmblm,*)rtetr,kp(ik,is)%eband(ib)
-                kp(ik,is)%tetrweight(ib)=CMPLX(rtetr,0d0)
+                kp(ik,is)%tetrweight(ib)=DCMPLX(rtetr,0d0)
               ENDDO
 C rtetr = tetrahedron weights of the band ib at this kpoint 
 C the field kp(ik,is)%eband(ib) = eigenvalues of the ib band at this kpoint
