@@ -275,6 +275,59 @@ def mixing_rotrep(op, l, P, ti):
     return rotrep
 
 
+# --- shell symmetry matrices (shared by symqmc and sympar) -------------------
+
+def _phase(op, ti):
+    a, c = op['a'], op['c']
+    return (c - a) if ti else (a + c)       # (g-a) on magnetic ops, else (a+g)
+
+
+def _l0_matrix(op, ti):
+    """s shell: 2x2 spin phase block diag(e, conj(e)) (outputqmc.f l==0)."""
+    e = np.exp(1j * _phase(op, ti) / 2)
+    return np.array([[e, 0], [0, np.conj(e)]], dtype=complex)
+
+
+def _nonmixing_matrix(op, shell, ti):
+    """Non-mixing SP+SO whole shell: the up/up block scaled by +-(a+g)/2,
+    block-diagonal over spin, with the orbital time-reversal operator on the
+    magnetic operations (setsym.f, outputqmc.f:1292-1339)."""
+    l, P = shell['l'], shell['P']
+    rotl = dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
+    if ti:
+        rotl = timeinv_orbital(l, rotl)
+    rotrep = P @ rotl @ np.conj(P.T)
+    e = np.exp(1j * _phase(op, ti) / 2)
+    d = 2 * l + 1
+    mat = np.zeros((2 * d, 2 * d), dtype=complex)
+    mat[:d, :d] = e * rotrep
+    mat[d:, d:] = np.conj(e) * rotrep
+    return mat
+
+
+def shell_matrix(op, shell, ti):
+    """Spinor symmetry matrix for one shell under one operation."""
+    l = shell['l']
+    if l == 0:
+        return _l0_matrix(op, ti)
+    if shell['mixing']:
+        return mixing_rotrep(op, l, shell['P'], bool(ti))
+    return _nonmixing_matrix(op, shell, ti)
+
+
+def build_orbs(info):
+    """One entry per INCLUDED orbital (sort, l, atom order)."""
+    orbs = []
+    for isort in range(1, info['nsort'] + 1):
+        sortinfo = info['sorts'][isort - 1]
+        for l in sortinfo['included_ls']:
+            for imu in range(1, info['mult'][isort - 1] + 1):
+                atom = sum(info['mult'][:isort - 1]) + imu
+                orbs.append(dict(atom=atom, sort=isort, l=l,
+                                 basis=sortinfo['basis']))
+    return orbs
+
+
 # --- case.indmftpr -----------------------------------------------------------
 
 def read_indmftpr(indmftpr):

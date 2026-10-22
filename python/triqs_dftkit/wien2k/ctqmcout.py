@@ -60,7 +60,7 @@ import numpy as np
 from scipy.linalg.lapack import zheev
 from scipy.linalg.blas import zgemm
 
-from ._dmftproj import (require_identity_struct, validate_so_windows, band_index_window, dmat, fmt_scalar, read_almblm,
+from ._dmftproj import (build_orbs as _build_orbs, require_identity_struct, validate_so_windows, band_index_window, dmat, fmt_scalar, read_almblm,
                         read_dmftsym, read_fromfile, read_indmftpr, reptrans,
                         rotloc_rotl_so, select_band_window, select_window,
                         tmat, write_row)
@@ -98,17 +98,6 @@ def _build_crorbs(info):
                 crorbs.append(dict(atom=atom, sort=isort, l=l,
                                   basis=sortinfo['basis'], first=(imu == 1)))
     return crorbs
-
-
-def _build_orbs(info):
-    orbs = []
-    for isort in range(1, info['nsort'] + 1):
-        sortinfo = info['sorts'][isort - 1]
-        for l in sortinfo['included_ls']:
-            for imu in range(1, info['mult'][isort - 1] + 1):
-                atom = sum(info['mult'][:isort - 1]) + imu
-                orbs.append(dict(atom=atom, sort=isort, l=l))
-    return orbs
 
 
 # --- Rloc spinor representation (set_rotloc.f / setsym.f) ---------------------
