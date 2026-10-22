@@ -49,9 +49,10 @@ path and writes the timeflag line; the paramagnetic tail is absent.
 import os
 import numpy as np
 
-from ._dmftproj import (dmat, fmt, mixing_rotrep, read_dmftsym, read_fromfile,
-                        read_indmftpr, reptrans, timeinv_orbital, tmat,
-                        write_row)
+from ._dmftproj import (fmt, read_dmftsym, read_fromfile, read_indmftpr,
+                        reptrans, shell_matrix, tmat, write_row)
+
+_shell_matrix = shell_matrix
 
 
 # --- included shells ---------------------------------------------------------
@@ -75,44 +76,6 @@ def _included_shells(info):
                 shells.append(dict(l=l, sort=isort + 1, atom=atom,
                                    basis=s['basis'], P=P, mixing=mixing))
     return shells
-
-
-# --- matrix construction (shared with symqmc) --------------------------------
-
-def _phase(op, ti):
-    a, c = op['a'], op['c']
-    return (c - a) if ti else (a + c)       # (g-a) on magnetic ops, else (a+g)
-
-
-def _l0_matrix(op, ti):
-    e = np.exp(1j * _phase(op, ti) / 2)
-    return np.array([[e, 0], [0, np.conj(e)]], dtype=complex)
-
-
-def _nonmixing_matrix(op, shell, ti):
-    """Non-mixing SP+SO whole shell: the up/up block scaled by +-(a+g)/2,
-    block-diagonal over spin, with the orbital time-reversal operator on the
-    magnetic operations (setsym.f, outputqmc.f:1292-1339)."""
-    l, P = shell['l'], shell['P']
-    rotl = dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
-    if ti:
-        rotl = timeinv_orbital(l, rotl)
-    rotrep = P @ rotl @ np.conj(P.T)
-    e = np.exp(1j * _phase(op, ti) / 2)
-    d = 2 * l + 1
-    mat = np.zeros((2 * d, 2 * d), dtype=complex)
-    mat[:d, :d] = e * rotrep
-    mat[d:, d:] = np.conj(e) * rotrep
-    return mat
-
-
-def _shell_matrix(op, shell, ti):
-    l = shell['l']
-    if l == 0:
-        return _l0_matrix(op, ti)
-    if shell['mixing']:
-        return mixing_rotrep(op, l, shell['P'], bool(ti))
-    return _nonmixing_matrix(op, shell, ti)
 
 
 # --- output ------------------------------------------------------------------

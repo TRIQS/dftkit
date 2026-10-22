@@ -50,8 +50,10 @@ this double-precision generator, whose cubic d basis uses exact coefficients.
 
 import numpy as np
 
-from ._dmftproj import (dmat, mixing_rotrep, read_dmftsym, read_fromfile,
-                        read_indmftpr, reptrans, timeinv_orbital)
+from ._dmftproj import (read_dmftsym, read_fromfile, read_indmftpr, reptrans,
+                        shell_matrix)
+
+_shell_matrix = shell_matrix
 
 
 # --- correlated shells -------------------------------------------------------
@@ -106,49 +108,6 @@ def write_symqmc(case):
         for isym, op in enumerate(ops):
             for sh in shells:
                 f.write(_format_matrix(_shell_matrix(op, sh, timeinv[isym])))
-
-
-def _shell_matrix(op, shell, ti):
-    """Spinor symmetry matrix for one correlated shell under one operation."""
-    l = shell['l']
-    if l == 0:
-        return _l0_matrix(op, ti)
-    if shell['mixing']:
-        return _mixing_matrix(op, shell, ti)
-    return _nonmixing_matrix(op, shell, ti)
-
-
-def _phase(op, ti):
-    a, c = op['a'], op['c']
-    return (c - a) if ti else (a + c)   # (g-a) on magnetic ops, else (a+g)
-
-
-def _l0_matrix(op, ti):
-    """s shell: 2x2 spin phase block diag(e, conj(e)) (outputqmc.f l==0)."""
-    e = np.exp(1j * _phase(op, ti) / 2)
-    return np.array([[e, 0], [0, np.conj(e)]], dtype=complex)
-
-
-def _nonmixing_matrix(op, shell, ti):
-    """Spin-diagonal basis: the up/up block scaled by +-(a+g)/2, with the
-    orbital time-reversal operator on the magnetic operations."""
-    l, P = shell['l'], shell['P']
-    rotl = dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
-    if ti:
-        rotl = timeinv_orbital(l, rotl)
-    rotrep = P @ rotl @ np.conj(P.T)
-    e = np.exp(1j * _phase(op, ti) / 2)
-    d = 2 * l + 1
-    mat = np.zeros((2 * d, 2 * d), dtype=complex)
-    mat[:d, :d] = e * rotrep
-    mat[d:, d:] = np.conj(e) * rotrep
-    return mat
-
-
-def _mixing_matrix(op, shell, ti):
-    """Spin-coupling basis: full 2(2l+1) spinor representation (setsym.f,
-    timeinv.f), shared with sympar via _dmftproj.mixing_rotrep."""
-    return mixing_rotrep(op, shell['l'], shell['P'], bool(ti))
 
 
 def _format_matrix(mat):
