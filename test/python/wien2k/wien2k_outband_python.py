@@ -22,6 +22,10 @@
 # the plotted path, is read from CaOs2_band.klist_band; the Fermi energy is the
 # last line of CaOs2_band.indmftpr (the band almblm keeps a placeholder eferm
 # record that the reader skips).
+#
+# CaOs2_band_cubic runs the same band inputs with a cubic (spin-diagonal) Os d
+# shell and an uncorrelated included Ca d shell, covering the non-mixing
+# projector path; its reference is native dmftproj -band output.
 
 import gzip
 import os
@@ -63,19 +67,21 @@ def _isfloat(tok):
         return False
 
 
-def _check(case):
+def _check(case, inputs=None):
+    inputs = inputs or case
     tmp = tempfile.mkdtemp()
     try:
-        for ext in ('indmftpr', 'klist_band'):
-            shutil.copy(os.path.join(HERE, f'{case}.{ext}'),
-                        os.path.join(tmp, f'{case}.{ext}'))
+        shutil.copy(os.path.join(HERE, f'{case}.indmftpr'),
+                    os.path.join(tmp, f'{case}.indmftpr'))
+        shutil.copy(os.path.join(HERE, f'{inputs}.klist_band'),
+                    os.path.join(tmp, f'{case}.klist_band'))
         shutil.copy(os.path.join(HERE, 'jbasis_d.dat'),
                     os.path.join(tmp, 'jbasis_d.dat'))
         for ext in ('struct', 'dmftsym'):
             shutil.copy(os.path.join(HERE, f'CaOs2.{ext}'),
                         os.path.join(tmp, f'{case}.{ext}'))
         for ext in ('almblmup', 'almblmdn'):
-            _gunzip(os.path.join(HERE, f'{case}.{ext}.gz'),
+            _gunzip(os.path.join(HERE, f'{inputs}.{ext}.gz'),
                     os.path.join(tmp, f'{case}.{ext}'))
         outband.write_outband(os.path.join(tmp, case))
         with gzip.open(os.path.join(HERE, f'{case}.outband.gz'), 'rt') as fh:
@@ -94,5 +100,6 @@ def _check(case):
 
 
 _check('CaOs2_band')
+_check('CaOs2_band_cubic', inputs='CaOs2_band')
 
 print('wien2k_outband_python: ok')
