@@ -64,8 +64,8 @@ orbs = [dict(atom=1, sort=1, l=l) for l in (0, 1)]
 raw = {(1, l): [np.eye(2 * l + 1, dtype=complex) * value
                 for value in (1., 2., 0.25, 0.25)] for l in (0, 1)}
 representations = {(l, 1, 0): (np.eye(2 * l + 1), False, 0.) for l in (0, 1)}
-result = parproj._symmetrize_densmat(orbs, {}, [dict(perm=[1])], 1,
-                                    representations, raw, 2, True, True)
+result = parproj._symmetrize_densmat(orbs, [dict(perm=[1])], 1,
+                                    representations, raw)
 for shell in raw:
     for actual, expected in zip(result[shell], raw[shell]):
         np.testing.assert_allclose(actual, expected, atol=1e-14, rtol=0)

@@ -39,8 +39,9 @@ ctqmcout are:
    LO-overlap token ovl_LO_udot (set_projections.f:163-197). All n radial
    channels are written separately (the ir loop).
 
-3. Three extra per-orbital blocks: the BZ-symmetrized, tetrahedron-weighted,
-   Rloc-rotated density matrix densmat (density.f + symmetrize_mat + rotdens_mat),
+3. Three extra per-orbital blocks: the BZ-symmetrized, point-integrated
+   (per-k weight), Rloc-rotated density matrix densmat
+   (density.f + symmetrize_mat + rotdens_mat),
    the per-orbital Rloc spinor rotrep (set_rotloc.f), and a time-reversal flag.
 
 The reference case CaOs2 is SP+SO (ifSP=ifSO=1, ns=2), so every per-orbital
@@ -344,8 +345,6 @@ def _read_almblm(path, info):
                 ovl_LO_udot=ovl_LO_udot, kp=kp)
 
 
-# --- band-window selection (set_projections.f, proj_mode==0) -----------------
-
 # --- included orbital descriptors --------------------------------------------
 
 def _build_orbs(info):
@@ -379,7 +378,7 @@ def _build_s12(l, isrt, n, spin):
 
 # --- srot rotrep (setsym.f) --------------------------------------------------
 
-def _srot_rotrep_nonmixing(op, l, transmat, ifSP, ifSO):
+def _srot_rotrep_nonmixing(op, l, transmat):
     """srot(isym)%rotrep(l,isrt)%mat, the (2l+1) up/up block of the symmetry op
     in the new basis: transmat . D(R)_{lm} . transmat^H, with the orbital
     time-reversal operator applied for the magnetic (timeinv) operations.
@@ -388,12 +387,8 @@ def _srot_rotrep_nonmixing(op, l, transmat, ifSP, ifSO):
     a, b, g, iprop = op['a'], op['b'], op['g'], op['iprop']
     krotm = op['krotm']
     det2 = krotm[0, 0] * krotm[1, 1] - krotm[0, 1] * krotm[1, 0]
-    if ifSP and ifSO:
-        timeinv = det2 < 0.0
-        phase = (g - a) if timeinv else (a + g)
-    else:
-        timeinv = False
-        phase = 0.0
+    timeinv = det2 < 0.0
+    phase = (g - a) if timeinv else (a + g)
     rotl = _dmat(l, a, b, g, float(iprop))
     rotrep = transmat @ rotl @ np.conj(transmat.T)
     if timeinv:
@@ -405,56 +400,6 @@ def _srot_rotrep_nonmixing(op, l, transmat, ifSP, ifSO):
 
 
 # --- rotloc rotrep (set_rotloc.f) under SP+SO, non-mixing --------------------
-
-def _euler(Rot):
-    """Euler angles (a, b, g) of a 3x3 proper rotation, dmftproj convention
-    (set_rotloc.f euler, called on TRANSPOSE(krotm))."""
-    def dot(u, v):
-        return float(np.dot(u, v))
-
-    def vecprod(u, v):
-        return np.cross(u, v)
-    R = Rot
-    y = np.array([0.0, 1.0, 0.0])
-    z = np.array([0.0, 0.0, 1.0])
-    yyy = R[:, 1]
-    zz = R[:, 2]
-    yy = vecprod(z, zz)
-    y_norm = math.sqrt(dot(yy, yy))
-    pi = math.pi
-    if y_norm < 1e-10:
-        d = dot(y, yyy)
-        a = math.acos(d / abs(d)) if abs(d) > 1.0 else math.acos(d)
-        if dot(z, zz) > 0.0:
-            c = 0.0
-            b = 0.0
-            if yyy[0] > 0.0:
-                a = 2 * pi - a
-        else:
-            c = a
-            a = 0.0
-            b = pi
-            if yyy[0] < 0.0:
-                c = 2 * pi - c
-    else:
-        yy = yy / y_norm
-        aa, bb, cc = dot(y, yy), dot(z, zz), dot(yy, yyy)
-        if abs(aa) > 1.0:
-            aa = aa / abs(aa)
-        if abs(bb) > 1.0:
-            bb = bb / abs(bb)
-        if abs(cc) > 1.0:
-            cc = cc / abs(cc)
-        b = math.acos(bb)
-        a = math.acos(aa)
-        c = math.acos(cc)
-        if yy[0] > 0.0:
-            a = 2 * pi - a
-        pom = vecprod(yy, yyy)
-        if dot(pom, zz) < 0.0:
-            c = 2 * pi - c
-    return a, b, c
-
 
 def _rotloc_rotrep_so(orb, ops, info, ref, transmat):
     """rotloc(iatom)%rotrep(l)%mat, the full 2*(2l+1) Rloc spinor rotation in
@@ -521,7 +466,7 @@ def _rotloc_rotrep_so(orb, ops, info, ref, transmat):
 
 # --- projector matn_rep (set_projections.f Theta path) -----------------------
 
-def _build_matn_rep(orb, info, spins, ns, windows, transmat, rot):
+def _build_matn_rep(orb, info, spins, windows, transmat, rot):
     """matn_rep[(ik, is)] -> (2l+1, nbsel, n): the raw radial-normalized Theta
     projector with the local rotation and the basis transform applied per
     radial channel (non-mixing SP+SO path, set_projections.f:591-621)."""
@@ -534,8 +479,7 @@ def _build_matn_rep(orb, info, spins, ns, windows, transmat, rot):
         if not incl:
             continue
         nbsel = nb_top - nb_bot + 1
-        for ispin in range(ns):
-            sp = spins[ispin]
+        for ispin, sp in enumerate(spins):
             kp = sp['kp'][ik]
             off_bot = nb_bot - kp['nbmin']
             off_top = nb_top - kp['nbmin']
@@ -560,7 +504,7 @@ def _build_matn_rep(orb, info, spins, ns, windows, transmat, rot):
 
 # --- density matrix (density.f Theta path, non-mixing SP+SO) -----------------
 
-def _orbital_densmat_blocks(orb, info, spins, ns, windows, matn_reps):
+def _orbital_densmat_blocks(orb, info, spins, windows, matn_reps):
     """The nsp=4 raw density-matrix blocks (up/up, dn/dn, up/dn, dn/up) for one
     orbital, point-integrated with the geometric k-weight (density.f:889-907,
     tetr=.FALSE. path). The window is the bands below e_bot (dmftproj.f:798)."""
@@ -592,8 +536,7 @@ def _orbital_densmat_blocks(orb, info, spins, ns, windows, matn_reps):
     return blocks
 
 
-def _symmetrize_densmat(orbs, info, ops, nsym, srot_rotreps, dens_raw, ns,
-                        ifSP, ifSO):
+def _symmetrize_densmat(orbs, ops, nsym, srot_rotreps, dens_raw):
     """symmetrize_mat for the non-mixing SP+SO path (symmetrize_mat.f:196-276).
     dens_raw[(atom, l)] -> [4 blocks]. Returns symmetrized blocks per shell.
 
@@ -621,7 +564,7 @@ def _symmetrize_densmat(orbs, info, ops, nsym, srot_rotreps, dens_raw, ns,
                     is_ = iss if iss <= 2 else iss - 2
                     isp = is_ - 1
                     tmp = dens_raw[(iatom, l)][iss - 1].copy()
-                    if ifSP and timeinv:
+                    if timeinv:
                         tmp = np.conj(tmp)
                     ephase = 1.0
                     if iss == 3:
@@ -684,16 +627,10 @@ def write_parproj(case):
                 raise NotImplementedError('non-identity struct local rotations are not implemented yet')
     nsym, ops, rotloc_ref = _read_dmftsym(case + '.dmftsym')
 
-    up, dn = case + '.almblmup', case + '.almblmdn'
-    if os.path.exists(up) and os.path.exists(dn):
-        spin_files = [up, dn]
-    else:
-        spin_files = [case + '.almblm']
-    ifSP = len(spin_files) == 2
-    ifSO = bool(info['so'])
-    if not ifSP:
+    spin_files = [case + '.almblmup', case + '.almblmdn']
+    if not all(os.path.exists(p) for p in spin_files):
         raise ValueError('spin-orbit parproj requires both up and down almblm files')
-    ns = 2 if ifSP else 1
+    ns = 2
 
     spins = [_read_almblm(p, info) for p in spin_files]
     nk = spins[0]['nk']
@@ -752,9 +689,9 @@ def write_parproj(case):
         op = rotloc_op[o['atom']]
         rot = _dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
         matn_reps[(o['atom'], o['l'])] = _build_matn_rep(
-            o, info, spins, ns, windows, transmat, rot)
+            o, info, spins, windows, transmat, rot)
         matn_reps_full[(o['atom'], o['l'])] = _build_matn_rep(
-            o, info, spins, ns, below_windows, transmat, rot)
+            o, info, spins, below_windows, transmat, rot)
 
     # ---- srot rotrep per (sort, isym) for symmetrize_mat ----
     srot_rotreps = {}
@@ -765,15 +702,14 @@ def write_parproj(case):
             transmat = transmats[(l, isrt)]
             for isym in range(nsym):
                 srot_rotreps[(l, isrt, isym)] = _srot_rotrep_nonmixing(
-                    ops[isym], l, transmat, ifSP, ifSO)
+                    ops[isym], l, transmat)
 
     # ---- density matrices: raw -> symmetrize -> rotdens ----
     dens_raw = {}
     for o in orbs:
         dens_raw[(o['atom'], o['l'])] = _orbital_densmat_blocks(
-            o, info, spins, ns, below_windows, matn_reps_full)
-    dens_sym = _symmetrize_densmat(orbs, info, ops, nsym, srot_rotreps,
-                                   dens_raw, ns, ifSP, ifSO)
+            o, info, spins, below_windows, matn_reps_full)
+    dens_sym = _symmetrize_densmat(orbs, ops, nsym, srot_rotreps, dens_raw)
 
     # ---- rotloc rotrep per orbital ----
     rotloc_rotrep = {}
@@ -826,5 +762,4 @@ def write_parproj(case):
                 _w(f, rotrep_loc[m, :].real)
             for m in range(2 * (2 * l + 1)):
                 _w(f, rotrep_loc[m, :].imag)
-            if ifSP:
-                f.write('%6d\n' % (1 if timeinv else 0))
+            f.write('%6d\n' % (1 if timeinv else 0))
