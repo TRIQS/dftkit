@@ -39,8 +39,9 @@ ctqmcout are:
    LO-overlap token ovl_LO_udot (set_projections.f:163-197). All n radial
    channels are written separately (the ir loop).
 
-3. Three extra per-orbital blocks: the BZ-symmetrized, tetrahedron-weighted,
-   Rloc-rotated density matrix densmat (density.f + symmetrize_mat + rotdens_mat),
+3. Three extra per-orbital blocks: the BZ-symmetrized, point-integrated
+   (per-k weight), Rloc-rotated density matrix densmat
+   (density.f + symmetrize_mat + rotdens_mat),
    the per-orbital Rloc spinor rotrep (set_rotloc.f), and a time-reversal flag.
 
 The reference case CaOs2 is SP+SO (ifSP=ifSO=1, ns=2), so every per-orbital
@@ -54,7 +55,6 @@ outputqmc.f parproj writer: 897-1183. set_projections.f s12/projector:
 rot_dens.f / setsym.f / set_rotloc.f for the symmetrization and Rloc rotation.
 """
 
-import math
 import os
 import numpy as np
 
@@ -63,10 +63,10 @@ from ._dmftproj import (build_orbs as _build_orbs, require_identity_struct, vali
                         rotloc_rotl_so, select_band_window, select_window, tmat, write_row)
 
 
-def _op_timeinv(op, ifSO):
+def _op_timeinv(op):
     det2 = (op['krotm'][0, 0] * op['krotm'][1, 1]
             - op['krotm'][0, 1] * op['krotm'][1, 0])
-    return bool(ifSO and det2 < 0.0)
+    return bool(det2 < 0.0)
 
 
 def _sqrtm_real_sym(O):
@@ -78,8 +78,6 @@ def _sqrtm_real_sym(O):
     D1 = Z * np.sqrt(w.astype(complex))
     return (D1 @ Z.T).real
 
-
-# --- included orbital descriptors --------------------------------------------
 
 # --- s12 radial transform (set_projections.f:163-197) ------------------------
 
@@ -100,21 +98,15 @@ def _build_s12(l, isrt, n, spin):
 
 # --- srot rotrep (setsym.f) --------------------------------------------------
 
-def _srot_rotrep_nonmixing(op, l, transmat, ifSP, ifSO):
+def _srot_rotrep_nonmixing(op, l, transmat):
     """srot(isym)%rotrep(l,isrt)%mat, the (2l+1) up/up block of the symmetry op
     in the new basis: transmat . D(R)_{lm} . transmat^H, with the orbital
     time-reversal operator applied for the magnetic (timeinv) operations.
 
     Returns (rotrep[2l+1,2l+1], timeinv, phase)."""
     a, b, g, iprop = op['a'], op['b'], op['g'], op['iprop']
-    krotm = op['krotm']
-    det2 = krotm[0, 0] * krotm[1, 1] - krotm[0, 1] * krotm[1, 0]
-    if ifSP and ifSO:
-        timeinv = det2 < 0.0
-        phase = (g - a) if timeinv else (a + g)
-    else:
-        timeinv = False
-        phase = 0.0
+    timeinv = _op_timeinv(op)
+    phase = (g - a) if timeinv else (a + g)
     rotl = dmat(l, a, b, g, float(iprop))
     rotrep = transmat @ rotl @ np.conj(transmat.T)
     if timeinv:
@@ -151,7 +143,7 @@ def _rotloc_rotrep_so(orb, ops, info, ref, transmat, mixing):
 
 # --- projector matn_rep (set_projections.f Theta path) -----------------------
 
-def _build_matn_rep(orb, info, spins, ns, windows, transmat, rot):
+def _build_matn_rep(orb, info, spins, windows, transmat, rot):
     """matn_rep[(ik, is)] -> (2l+1, nbsel, n): the raw radial-normalized Theta
     projector with the local rotation and the basis transform applied per
     radial channel (non-mixing SP+SO path, set_projections.f:591-621)."""
@@ -164,8 +156,7 @@ def _build_matn_rep(orb, info, spins, ns, windows, transmat, rot):
         if not incl:
             continue
         nbsel = nb_top - nb_bot + 1
-        for ispin in range(ns):
-            sp = spins[ispin]
+        for ispin, sp in enumerate(spins):
             kp = sp['kp'][ik]
             off_bot = nb_bot - kp['nbmin']
             off_top = nb_top - kp['nbmin']
@@ -279,7 +270,7 @@ def _rotdens_densmat_mixing(blk, rotrep_loc, timeinv):
 
 # --- density matrix (density.f Theta path, non-mixing SP+SO) -----------------
 
-def _orbital_densmat_blocks(orb, info, spins, ns, windows, matn_reps):
+def _orbital_densmat_blocks(orb, info, spins, windows, matn_reps):
     """The nsp=4 raw density-matrix blocks (up/up, dn/dn, up/dn, dn/up) for one
     orbital, point-integrated with the geometric k-weight (density.f:889-907,
     tetr=.FALSE. path). The window is the bands below e_bot (dmftproj.f:798)."""
@@ -311,8 +302,7 @@ def _orbital_densmat_blocks(orb, info, spins, ns, windows, matn_reps):
     return blocks
 
 
-def _symmetrize_densmat(orbs, info, ops, nsym, srot_rotreps, dens_raw, ns,
-                        ifSP, ifSO):
+def _symmetrize_densmat(orbs, ops, nsym, srot_rotreps, dens_raw):
     """symmetrize_mat for the non-mixing SP+SO path (symmetrize_mat.f:196-276).
     dens_raw[(atom, l)] -> [4 blocks]. Returns symmetrized blocks per shell.
 
@@ -340,7 +330,7 @@ def _symmetrize_densmat(orbs, info, ops, nsym, srot_rotreps, dens_raw, ns,
                     is_ = iss if iss <= 2 else iss - 2
                     isp = is_ - 1
                     tmp = dens_raw[(iatom, l)][iss - 1].copy()
-                    if ifSP and timeinv:
+                    if timeinv:
                         tmp = np.conj(tmp)
                     ephase = 1.0
                     if iss == 3:
@@ -386,21 +376,15 @@ def write_parproj(case):
     require_identity_struct(case)
     nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
 
-    up, dn = case + '.almblmup', case + '.almblmdn'
-    if os.path.exists(up) and os.path.exists(dn):
-        spin_files = [up, dn]
-    else:
-        spin_files = [case + '.almblm']
-    ifSP = len(spin_files) == 2
-    ifSO = bool(info['so'])
-    ns = 2 if ifSP else 1
+    spin_files = [case + '.almblmup', case + '.almblmdn']
+    if not all(os.path.exists(p) for p in spin_files):
+        raise ValueError('spin-orbit parproj requires both up and down almblm files')
 
     spins = [read_almblm(p, info, projectors=True) for p in spin_files]
     nk = spins[0]['nk']
     info['nk'] = nk
 
     orbs = _build_orbs(info)
-    norb = len(orbs)
 
     # Two band ranges (dmftproj.f:798,836): the energy window [e_bot, e_top]
     # for the written Theta projector (block A), and the bands below e_bot
@@ -457,9 +441,9 @@ def write_parproj(case):
                 o, info, spins, below_windows, transmat, rot)
         else:
             matn_reps[(o['atom'], o['l'])] = _build_matn_rep(
-                o, info, spins, ns, windows, transmat, rot)
+                o, info, spins, windows, transmat, rot)
             matn_reps_full[(o['atom'], o['l'])] = _build_matn_rep(
-                o, info, spins, ns, below_windows, transmat, rot)
+                o, info, spins, below_windows, transmat, rot)
 
     # ---- rotloc rotrep per orbital ----
     rotloc_rotrep = {}
@@ -480,12 +464,12 @@ def write_parproj(case):
             l, isrt = o['l'], o['sort']
             for isym in range(nsym):
                 srot_rotreps[(l, isrt, isym)] = _srot_rotrep_nonmixing(
-                    ops[isym], l, transmats[(l, isrt)], ifSP, ifSO)
+                    ops[isym], l, transmats[(l, isrt)])
         dens_raw = {(o['atom'], o['l']): _orbital_densmat_blocks(
-            o, info, spins, ns, below_windows, matn_reps_full)
+            o, info, spins, below_windows, matn_reps_full)
             for o in nonmix_orbs}
-        dens_sym = _symmetrize_densmat(nonmix_orbs, info, ops, nsym,
-                                       srot_rotreps, dens_raw, ns, ifSP, ifSO)
+        dens_sym = _symmetrize_densmat(nonmix_orbs, ops, nsym,
+                                       srot_rotreps, dens_raw)
         for o in nonmix_orbs:
             rotrep_loc, timeinv = rotloc_rotrep[(o['atom'], o['l'])]
             densprint[(o['atom'], o['l'])] = _rotdens_densmat(
@@ -499,7 +483,7 @@ def write_parproj(case):
     for (l, sort), group in mixing_groups.items():
         rotreps = []
         for op in ops:
-            ti = _op_timeinv(op, ifSO)
+            ti = _op_timeinv(op)
             rotreps.append((mixing_rotrep(op, l, transmats[(l, sort)], ti), ti))
         raw = {o['atom']: _orbital_densmat_mixing(
             o, info, spins, below_windows, matn_reps_full) for o in group}
@@ -533,11 +517,11 @@ def write_parproj(case):
                         for m in range(2 * (2 * l + 1)):
                             write_row(f, P[m, :].imag)
                         continue
-                    for ispin in range(ns):
+                    for ispin in range(2):
                         P = matn_reps[(atom, l)][(ik, ispin)][:, :, ir]
                         for mi in range(2 * l + 1):
                             write_row(f, P[mi, :].real)
-                    for ispin in range(ns):
+                    for ispin in range(2):
                         P = matn_reps[(atom, l)][(ik, ispin)][:, :, ir]
                         for mi in range(2 * l + 1):
                             write_row(f, P[mi, :].imag)
@@ -555,5 +539,4 @@ def write_parproj(case):
                 write_row(f, rotrep_loc[m, :].real)
             for m in range(2 * (2 * l + 1)):
                 write_row(f, rotrep_loc[m, :].imag)
-            if ifSP:
-                f.write('%6d\n' % (1 if timeinv else 0))
+            f.write('%6d\n' % (1 if timeinv else 0))

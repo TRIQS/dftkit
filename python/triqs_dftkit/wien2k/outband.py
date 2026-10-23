@@ -255,7 +255,7 @@ def write_outband(case):
                 o, info, spins, windows, transmat, rot)
         else:
             matn_reps[(o['atom'], o['l'])] = _build_matn_rep(
-                o, info, spins, ns, windows, transmat, rot)
+                o, info, spins, windows, transmat, rot)
 
     # ---- write ----
     with open(case + '.outband', 'w') as f:
