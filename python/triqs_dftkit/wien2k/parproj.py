@@ -57,7 +57,7 @@ rot_dens.f / setsym.f / set_rotloc.f for the symmetrization and Rloc rotation.
 import os
 import numpy as np
 
-from ._dmftproj import (build_orbs as _build_orbs, require_identity_struct, validate_so_windows, band_index_window, dmat, mixing_rotrep, read_almblm, read_dmftsym,
+from ._dmftproj import (build_orbs as _build_orbs, require_identity_struct, validate_spin_windows, band_index_window, dmat, mixing_rotrep, read_almblm, read_dmftsym,
                         read_fromfile, read_indmftpr, reptrans,
                         rotloc_rotl_so, select_band_window, select_window, tmat, write_row)
 
@@ -458,7 +458,7 @@ def write_parproj(case):
             below_windows.append(select_band_window(kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
 
     if ifSO or ifSP:
-        validate_so_windows(spins, info, windows, below_windows)
+        validate_spin_windows(spins, info, windows, below_windows)
     elif not all(window[0] and window[1] <= window[2] for window in windows):
         raise ValueError('projectors require a nonempty included window at every k-point')
 

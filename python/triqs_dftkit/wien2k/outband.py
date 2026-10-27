@@ -51,7 +51,7 @@ import os
 import numpy as np
 from scipy.linalg.blas import zgemm
 
-from ._dmftproj import (require_identity_struct, validate_so_windows, dmat, read_almblm, read_dmftsym, read_fromfile,
+from ._dmftproj import (require_identity_struct, validate_spin_windows, dmat, read_almblm, read_dmftsym, read_fromfile,
                         read_indmftpr, reptrans, select_window, to_float,
                         write_row)
 from .ctqmcout import _build_crorbs, _sqrt_inv
@@ -142,7 +142,7 @@ def write_outband(case):
         windows.append(select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
                                      info['e_bot'], info['e_top']))
 
-    validate_so_windows(spins, info, windows)
+    validate_spin_windows(spins, info, windows)
 
     transmats = {}
     mixing = {}

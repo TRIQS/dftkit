@@ -48,10 +48,8 @@ through single-precision CMPLX differs from this output at about 1e-7.
 
 import os
 
-import numpy as np
-
-from ._dmftproj import (read_dmftsym, read_fromfile, read_indmftpr, reptrans,
-                        shell_matrix, tmat)
+from ._dmftproj import (paramag_time_op, read_dmftsym, read_fromfile, read_indmftpr,
+                        reptrans, shell_matrix)
 
 _shell_matrix = shell_matrix
 
@@ -120,18 +118,7 @@ def write_symqmc(case):
                 f.write(_format_matrix(_shell_matrix(op, sh, timeinv[isym], ifSO)))
         if not ifSP:
             for sh in shells:
-                f.write(_format_matrix(_time_op_matrix(sh)))
-
-
-def _time_op_matrix(shell):
-    """Paramagnetic time-reversal operator for one correlated shell (.not.ifSP,
-    outputqmc.f:835-887): the (2l+1) operator P T P^T in the new basis; the s
-    shell reduces to the 1x1 identity."""
-    l = shell['l']
-    if l == 0:
-        return np.array([[1.0 + 0j]], dtype=complex)
-    P = shell['P']
-    return (P @ tmat(l) @ P.T) @ np.eye(2 * l + 1, dtype=complex)
+                f.write(_format_matrix(paramag_time_op(sh)))
 
 
 def _format_matrix(mat):

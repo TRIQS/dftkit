@@ -45,10 +45,9 @@ paramagnetic time-reversal tail when the input is not spin-polarized.
 """
 
 import os
-import numpy as np
 
-from ._dmftproj import (fmt, tmat, read_dmftsym, read_fromfile, read_indmftpr, reptrans,
-                        shell_matrix, write_row)
+from ._dmftproj import (paramag_time_op, read_dmftsym, read_fromfile, read_indmftpr,
+                        reptrans, shell_matrix, write_row)
 
 _shell_matrix = shell_matrix
 
@@ -115,23 +114,8 @@ def write_sympar(case):
 
         for isym, op in enumerate(ops):
             for sh in shells:
-                l = sh['l']
-                ti = bool(timeflag[isym])
-                if l == 0 and not (ifSP and ifSO):
-                    f.write(fmt(1.0) + '\n')
-                    f.write(fmt(0.0) + '\n')
-                    continue
-                _write_matrix(f, _shell_matrix(op, sh, ti, ifSO))
+                _write_matrix(f, _shell_matrix(op, sh, bool(timeflag[isym]), ifSO))
 
         if not ifSP:
             for sh in shells:
-                l = sh['l']
-                if l == 0:
-                    f.write(fmt(1.0) + '\n')
-                    f.write(fmt(0.0) + '\n')
-                    continue
-                tm = tmat(l)
-                op = sh['P'] @ tm @ sh['P'].T
-                ident = np.eye(2 * l + 1, dtype=complex)
-                time_op = op @ np.conj(ident)
-                _write_matrix(f, time_op)
+                _write_matrix(f, paramag_time_op(sh))

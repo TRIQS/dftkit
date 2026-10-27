@@ -60,7 +60,7 @@ import numpy as np
 from scipy.linalg.lapack import zheev
 from scipy.linalg.blas import zgemm
 
-from ._dmftproj import (build_orbs as _build_orbs, require_identity_struct, validate_so_windows, band_index_window, dmat, fmt_scalar, read_almblm,
+from ._dmftproj import (build_orbs as _build_orbs, require_identity_struct, validate_spin_windows, band_index_window, dmat, fmt_scalar, read_almblm,
                         read_dmftsym, read_fromfile, read_indmftpr, reptrans,
                         rotloc_rotl_so, select_band_window, select_window,
                         tmat, write_row)
@@ -198,7 +198,7 @@ def write_ctqmcout(case):
                 kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
 
     if ifSO or len(spins) == 2:
-        validate_so_windows(spins, info, windows, win_below)
+        validate_spin_windows(spins, info, windows, win_below)
     elif not all(window[0] and window[1] <= window[2] for window in windows):
         raise ValueError('projectors require a nonempty included window at every k-point')
 

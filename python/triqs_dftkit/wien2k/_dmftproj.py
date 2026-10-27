@@ -198,6 +198,16 @@ def timeinv_orbital(l, mat):
     return tmat(l) @ np.conj(mat)
 
 
+def paramag_time_op(shell):
+    """Paramagnetic time-reversal operator P T P^T of one non-mixing shell in
+    its basis (outputqmc.f, .not.ifSP); the 1x1 identity for an s shell."""
+    l = shell['l']
+    if l == 0:
+        return np.ones((1, 1), dtype=complex)
+    P = shell['P']
+    return P @ tmat(l) @ P.T
+
+
 def mixing_timeinv_op(l, P):
     """The spinor time-reversal operator -i sigma_y (x) T in the mixing basis:
     tinv_{new} = P tinv_{lm} P^T (timeinv.f, ifmixing branch). Returned as the
@@ -622,7 +632,7 @@ def require_identity_struct(case):
                 raise NotImplementedError('non-identity struct local rotations are not implemented yet')
 
 
-def validate_so_windows(spins, info, windows, below=None):
+def validate_spin_windows(spins, info, windows, below=None):
     """Require valid selected windows and the same absolute bands in both spins."""
     if len(spins) != 2:
         raise ValueError('two-spin projectors require both up and down almblm files')
