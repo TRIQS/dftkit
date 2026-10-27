@@ -47,8 +47,7 @@ ctqmcout are:
 The reference case CaOs2 is SP+SO (ifSP=ifSO=1, ns=2), so every per-orbital
 matrix is the full 2*(2l+1)=10 spin+orbital block. The exact cubic transmat and
 the rot_projectmat local rotation are applied to matn_rep before writing,
-exactly as in ctqmcout (dmftproj reads the same full-precision templates after
-the precision fix).
+exactly as in ctqmcout.
 
 outputqmc.f parproj writer: 897-1183. set_projections.f s12/projector:
 163-197/273-622. density.f Theta path: 588-915. symmetrize_mat.f /

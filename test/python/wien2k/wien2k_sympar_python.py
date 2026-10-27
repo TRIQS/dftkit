@@ -9,9 +9,8 @@
 # an uncorrelated Ca d-shell to the correlated Os d-shells. Inputs are the shared
 # CaOs2 almblm/struct/dmftsym renamed to the CaOs2_partial case.
 #
-# Floats compared at 1e-7: dmftproj stores the cubic basis transform through a
-# single-precision CMPLX cast, so its matrices carry ~1e-7 noise the double-
-# precision generator reproduces to the same floor.
+# Floats compared at 1e-11 against native dmftproj output (full-precision
+# cubic-d template).
 
 import gzip
 import os

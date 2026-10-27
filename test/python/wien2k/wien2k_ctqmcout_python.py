@@ -6,24 +6,24 @@
 # Verify the pure-Python case.ctqmcout generator (triqs_dftkit.wien2k.ctqmcout)
 # reproduces the dmftproj Fortran correlated-shell projectors to machine
 # precision: regenerate case.ctqmcout from the almblm/struct/dmftsym + a wide
-# energy window and compare to the precision-fixed dmftproj reference.
+# energy window and compare to the native dmftproj reference.
 #
 # The window (-2.0, 3.0) keeps 50 bands, more than the 20 correlated spin-orbitals
-# of the two SOC Os d shells, so the Loewdin overlap O is full rank.
-# Reference built with the precision-fixed dmftproj (#14) and full-precision
-# templates. The original narrow window is not a valid Loewdin oracle.
+# of the two SOC Os d shells, so the Loewdin overlap O is full rank. The
+# references are native dmftproj output with double-precision casts and a
+# full-precision cubic-d template.
 #
 # CaOs2_jbasis_full exercises the spin-mixing fromfile (|j, m_j>) path: the Os d
 # shell is a 2(2l+1)=10 spinor basis (jbasis_d.dat), so the projector, Rloc
-# rotrep and complex-harmonics transform blocks are the full mixing matrices the
-# dft_tools #148 path singles out. Same wide window for the full-rank Loewdin.
+# rotrep and complex-harmonics transform blocks are the full mixing matrices.
+# Same wide window for the full-rank Loewdin.
 #
 # CaOs2_mode1_full and CaOs2_mode2_full exercise the band-index projection modes
 # (set_projections.f:70-88). Mode 1 ("-2.0 3.0 1") scans all spins/k for the
 # global band-index window; mode 2 ("43 92 2") takes the indices straight from
 # the window line. Both resolve to bands 43..92 (50 bands > 20 correlated
 # spin-orbitals), so the Loewdin overlap stays full rank and the projectors
-# match the precision-fixed dmftproj to machine precision.
+# match the native dmftproj to machine precision.
 
 import gzip
 import os

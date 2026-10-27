@@ -9,7 +9,8 @@
 # an uncorrelated Ca d-shell. Inputs are the shared CaOs2 almblm/struct/dmftsym
 # renamed to the CaOs2_partial case.
 #
-# Floats compared at 1e-7 (dmftproj single-precision basis-transform floor).
+# Floats compared at 1e-11 against native dmftproj output (full-precision
+# cubic-d template).
 
 import gzip
 import os

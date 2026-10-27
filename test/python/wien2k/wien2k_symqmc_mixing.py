@@ -11,11 +11,9 @@
 #   - an l = 0 (s) correlated shell, the 2x2 spin phase block.
 #
 # Both reuse the CaOs2 symmetry input (16 operations, 8 of them time-reversal).
-# The reference is the dmftproj Fortran case.symqmc for the same input, stored as
-# the matrix data in single precision: dmftproj reads the fromfile basis with a
-# single-precision CMPLX cast (set_ang_trans.f), so its output there carries a
-# ~1e-7 error. The generator is full double precision, so we compare at 1e-6 and
-# separately assert each Python spinor matrix is unitary.
+# The reference is the matrix data of the dmftproj case.symqmc for the same
+# input, stored in double precision and compared at 1e-11; each Python spinor
+# matrix is separately checked for unitarity.
 
 import os
 import shutil
@@ -73,7 +71,7 @@ def _check(indmftpr, ref_npy, extra=(), unit_tol=1e-7):
             assert dev < unit_tol, ('not unitary', dev)
 
 
-# spin-mixing |j, m_j> basis: the path dft_tools #148 singles out
+# spin-mixing |j, m_j> basis
 data, shells, _, _ = _run('CaOs2_jbasis.indmftpr',
                           (('jbasis_d.dat', 'jbasis_d.dat'),))
 assert shells[0]['mixing'] and shells[0]['P'].shape == (10, 10)

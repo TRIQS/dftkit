@@ -6,8 +6,8 @@
 # Verify the pure-Python case.outband generator (triqs_dftkit.wien2k.outband)
 # reproduces the dmftproj Fortran band-structure projectors to machine
 # precision: regenerate case.outband from the band-mode almblm/struct/dmftsym,
-# the k-path (klist_band) and the band indmftpr, and compare to the
-# precision-fixed dmftproj -band reference.
+# the k-path (klist_band) and the band indmftpr, and compare to the native
+# dmftproj -band reference (full-precision cubic-d template).
 #
 # case.outband feeds convert_bands_input. It is the band analog of
 # case.ctqmcout: the same correlated-shell projector construction (raw Alm/Clm

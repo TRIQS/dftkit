@@ -41,11 +41,9 @@ Covers all dmftproj spin-orbit cases:
   time-reversal operator -i sigma_y (x) T applied to the magnetic operations;
 - l = 0 (s) shells: the 2x2 spin phase block.
 
-The mixing fromfile path is the one dft_tools #148 singles out. Legacy dmftproj reads
-both cubic and fromfile bases with single-precision CMPLX casts and a 250-column
-line cap (Fortran set_ang_trans.f), and evaluates spin phases in single precision
-(outputqmc.f, setsym.f). Its case.symqmc therefore differs at about 1e-7 from
-this double-precision generator, whose cubic d basis uses exact coefficients.
+All matrices are built in double precision from the exact cubic harmonics.
+A case.symqmc written by a dmftproj that casts the basis or the spin phases
+through single-precision CMPLX differs from this output at about 1e-7.
 """
 
 import numpy as np
@@ -62,7 +60,7 @@ def _correlated_shells(info):
     """One entry per correlated atom (l_inc==2), in sort order. Each shell
     carries l, basis name, its transform matrix P = <new|m> and a mixing flag
     (True for a spin-coupling fromfile basis). symqmc builds its symmetry
-    matrices from the EXACT cubic harmonics (no single-precision cast)."""
+    matrices from the exact cubic harmonics."""
     shells = []
     for isort in range(info['nsort']):
         s = info['sorts'][isort]
@@ -71,7 +69,7 @@ def _correlated_shells(info):
             if basis == 'fromfile':
                 P, mixing = read_fromfile(s['sourcefile'], l)
             else:
-                P, mixing = reptrans(basis, l, cast=False), False
+                P, mixing = reptrans(basis, l), False
             for _ in range(info['mult'][isort]):
                 shells.append(dict(l=l, basis=basis, P=P, mixing=mixing))
     return shells

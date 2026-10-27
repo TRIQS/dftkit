@@ -40,16 +40,13 @@ a, b = dp.read_two_complex(r)
 assert a == complex(3.0, -4.0) and b == complex(5.0, 6.0)
 
 
-# --- angular basis: cubic transform, with and without the float32 cast -------
+# --- angular basis: cubic transform -------------------------------------------
 
-exact = dp.reptrans('cubic', 2, cast=False)
-cast = dp.reptrans('cubic', 2, cast=True)
+exact = dp.reptrans('cubic', 2)
 assert exact.shape == (5, 5)
 # unitary
 assert np.max(np.abs(exact @ np.conj(exact.T) - np.eye(5))) < 1e-12
-# the cast truncates 1/sqrt2 to single precision (legacy constructor rounding)
 assert abs(abs(exact[1, 0]) - 2 ** -0.5) < 1e-15
-assert 0 < abs(abs(cast[1, 0]) - 2 ** -0.5) < 1e-6
 assert dp.reptrans('complex', 2).shape == (5, 5)
 assert np.allclose(dp.reptrans('complex', 2), np.eye(5))
 

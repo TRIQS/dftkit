@@ -29,10 +29,9 @@ basis transforms (transmat), the case.indmftpr / case.dmftsym parsers, the
 proj_mode==0 band-window selection and the gfortran-style real formatters.
 This module owns each of those exactly once.
 
-All generators use the exact double-precision cubic harmonics. dmftproj reads
-the same coefficients from full-precision SRC_templates (the precision-fix PR),
-so the port reproduces its output to machine precision. `reptrans` keeps a
-`cast` flag only to reproduce the legacy single-precision template on demand.
+All generators use the exact double-precision cubic harmonics; with
+full-precision SRC_templates dmftproj reads the same coefficients, so the port
+reproduces its output to machine precision.
 """
 
 import math
@@ -97,9 +96,7 @@ def read_two_complex(r):
 
 
 # --- angular bases: transmat = <new_i|m>, m = -l..l --------------------------
-# Standard cubic harmonics, Wien2k convention, exact double precision. dmftproj
-# reads the same coefficients from full-precision SRC_templates (the precision-
-# fix PR); `reptrans(..., cast=True)` reproduces the legacy float32 template.
+# Standard cubic harmonics, Wien2k convention, exact double precision.
 
 _COMPLEX = {l: np.eye(2 * l + 1, dtype=complex) for l in range(4)}
 
@@ -115,14 +112,11 @@ _CUBIC = {
 }
 
 
-def reptrans(basis, l, cast=False):
-    """transmat = <new_i|m>, exact double-precision cubic harmonics. dmftproj
-    reads these from full-precision SRC_templates (the precision-fix PR), so the
-    port uses the exact analytic values. A complex basis is the exact identity.
-    `cast` is retained for callers that still want the legacy float32 truncation."""
+def reptrans(basis, l):
+    """transmat = <new_i|m>: the exact double-precision cubic harmonics for a
+    cubic basis, the identity for a complex basis."""
     if basis == 'cubic' and l in _CUBIC:
-        c = _CUBIC[l]
-        return c.astype(np.complex64).astype(np.complex128) if cast else c
+        return _CUBIC[l]
     if basis == 'cubic' and l != 0:
         raise NotImplementedError('cubic f harmonics are not implemented yet')
     return _COMPLEX[l]

@@ -50,8 +50,8 @@ It follows the Fortran path field by field:
   (set_rotloc.f / setsym.f).
 
 ctqmcout layout is outputqmc.f:66-613. The cubic transform uses the exact
-analytic harmonics; with the precision-fixed dmftproj (full double precision
-templates and KIND=8 casts) the port reproduces case.ctqmcout to machine
+analytic harmonics; against a dmftproj with double-precision casts and
+full-precision templates the port reproduces case.ctqmcout to machine
 precision on a full-rank window.
 """
 

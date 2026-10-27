@@ -31,8 +31,7 @@ covers ALL INCLUDED shells (l_inc in {1,2}), iterating orb(1:norb) instead of
 crorb(1:ncrorb). The orb ordering is (sort, l, atom) per dmftproj.f:357-387.
 
 The per-shell basis transmat is per sort: a complex shell uses the exact
-identity, a cubic shell uses the exact double-precision cubic-d harmonics (the
-same full-precision templates dmftproj reads after the precision fix), as
+identity, a cubic shell uses the exact double-precision cubic-d harmonics, as
 ctqmcout does. Mixed within one file (Ca complex, Os cubic for CaOs2).
 
 sympar drops three things symqmc/ctqmcout carry: no orbital-description block
