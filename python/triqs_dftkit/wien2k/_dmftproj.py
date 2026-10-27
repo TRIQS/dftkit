@@ -21,12 +21,12 @@
 
 """Shared dmftproj machinery for the pure-Python case.* generators.
 
-The five generators (symqmc, oubwin, ctqmcout, sympar, parproj) reproduce
+The generators (symqmc, oubwin, ctqmcout, sympar, parproj, outband) reproduce
 different outputs of the dmftproj Fortran executable but draw on the same
 underlying pieces: the list-directed almblm reader, the Fortran real/complex
 token parsers, the Wigner-D rotation in the dmftproj convention, the angular
 basis transforms (transmat), the case.indmftpr / case.dmftsym parsers, the
-proj_mode==0 band-window selection and the gfortran-style real formatters.
+band-window selection and the gfortran-style real formatters.
 This module owns each of those exactly once.
 
 All generators use the exact double-precision cubic harmonics; with
