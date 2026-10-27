@@ -31,6 +31,7 @@ import gzip
 import os
 import shutil
 import tempfile
+from unittest.mock import patch
 import numpy as np
 
 from triqs_dftkit.wien2k import outband
@@ -83,7 +84,9 @@ def _check(case, inputs=None):
         for ext in ('almblmup', 'almblmdn'):
             _gunzip(os.path.join(HERE, f'{inputs}.{ext}.gz'),
                     os.path.join(tmp, f'{case}.{ext}'))
-        outband.write_outband(os.path.join(tmp, case))
+        # Band parsing must also work without writable temporary storage.
+        with patch('tempfile.NamedTemporaryFile', side_effect=AssertionError('temporary file created')):
+            outband.write_outband(os.path.join(tmp, case))
         with gzip.open(os.path.join(HERE, f'{case}.outband.gz'), 'rt') as fh:
             _compare(os.path.join(tmp, f'{case}.outband'), fh.readlines())
         with open(os.path.join(tmp, f'{case}.klist_band'), 'w') as fh:

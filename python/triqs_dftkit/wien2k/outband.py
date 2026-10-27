@@ -48,7 +48,6 @@ included-orbital radial sizes, the raw Theta projectors, and the k-labels.
 """
 
 import os
-import tempfile
 import numpy as np
 from scipy.linalg.blas import zgemm
 
@@ -63,18 +62,12 @@ def _read_indmftpr_band(indmftpr):
     """case.indmftpr in band mode: the standard parse, plus the Fermi energy
     appended as the last physical line after the (e_bot e_top proj_mode) window
     line. The trailing scalar would be mistaken for the window line, so feed
-    read_indmftpr the file without that record and return eferm separately."""
-    raw = [l.split('!')[0].rstrip('\n') for l in open(indmftpr)]
+    read_indmftpr the lines without that record and return eferm separately."""
+    with open(indmftpr) as fh:
+        raw = [l.split('!')[0].rstrip('\n') for l in fh]
     nonblank = [i for i, l in enumerate(raw) if l.strip() != '']
     eferm = to_float(raw[nonblank[-1]].split()[0])
-    tmp = tempfile.NamedTemporaryFile('w', suffix='.indmftpr', delete=False,
-                                      dir=os.path.dirname(os.path.abspath(indmftpr)))
-    tmp.write('\n'.join(raw[:nonblank[-1]]) + '\n')
-    tmp.close()
-    try:
-        info = read_indmftpr(tmp.name)
-    finally:
-        os.unlink(tmp.name)
+    info = read_indmftpr(indmftpr, lines=raw[:nonblank[-1]])
     return info, eferm
 
 
@@ -83,15 +76,10 @@ def _read_almblm_band(path, info, eferm):
     record is a placeholder the band path ignores; the Fermi shift uses the
     eferm passed in (from case.indmftpr, dmftproj.f:576-581). read_almblm reads
     the 4th record as eferm, so overwrite that record with the indmftpr value."""
-    text = open(path).read().splitlines()
+    with open(path) as fh:
+        text = fh.read().splitlines()
     text[3] = ' %.16E' % eferm          # Reader record 4 (physical line index 3)
-    tmp = tempfile.NamedTemporaryFile('w', suffix='.almblm', delete=False)
-    tmp.write('\n'.join(text) + '\n')
-    tmp.close()
-    try:
-        return read_almblm(tmp.name, info, projectors=True)
-    finally:
-        os.unlink(tmp.name)
+    return read_almblm(path, info, projectors=True, lines=text)
 
 
 def read_k_list(path):

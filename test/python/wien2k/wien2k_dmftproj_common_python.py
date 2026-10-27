@@ -109,9 +109,17 @@ nsym, ops = dp.read_dmftsym(os.path.join(HERE, 'CaOs2.dmftsym'))
 assert nsym == 16 and len(ops) == 16
 assert all(o['krotm'].shape == (3, 3) and len(o['perm']) == 3 for o in ops)
 
-# Atomic sorts and symmetry operations are independent counts (P1 can have
-# many inequivalent atoms but only the identity operation).
 with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, 'noso.indmftpr')
+    with open(path, 'w') as fh:
+        fh.write('1\n1\n1\ncomplex\n0 2\n0 0\n0\n'
+                 '-2.0 3.0 2 ! band window\n')
+    parsed = dp.read_indmftpr(path)
+    assert parsed['so'] == 0
+    assert (parsed['e_bot'], parsed['e_top'], parsed['proj_mode']) == (-2.0, 3.0, 2)
+
+    # Atomic sorts and symmetry operations are independent counts (P1 can have
+    # many inequivalent atoms but only the identity operation).
     path = os.path.join(tmp, 'P1.dmftsym')
     with open(path, 'w') as fh:
         fh.write('1\n1 2\nSym. op. 1\n0 0 0 1\n'

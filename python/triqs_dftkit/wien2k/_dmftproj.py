@@ -49,9 +49,11 @@ class Reader:
     common case: every almblm logical record fits on one line). `skip()`
     consumes one physical line unconditionally, matching READ('()')."""
 
-    def __init__(self, path):
-        with open(path) as fh:
-            self._lines = fh.read().splitlines()
+    def __init__(self, path, *, lines=None):
+        if lines is None:
+            with open(path) as fh:
+                lines = fh.read().splitlines()
+        self._lines = lines
         self._i = 0
 
     def skip(self):
@@ -324,15 +326,19 @@ def build_orbs(info):
 
 # --- case.indmftpr -----------------------------------------------------------
 
-def read_indmftpr(indmftpr):
+def read_indmftpr(indmftpr, *, lines=None):
     """Full structured parse of case.indmftpr.
 
     Returns a dict with nsort, mult, lmax, the spin-orbit flag `so`, the energy
     window (e_bot, e_top, proj_mode) and one `sorts` entry per atomic sort with
     its basis name, optional fromfile sourcefile path, and the correlated /
     included l lists (l_inc==2 / l_inc in {1,2}). Every generator derives its
-    shell or orbital list from this one parse."""
-    raw = [l.split('!')[0].strip() for l in open(indmftpr)]
+    shell or orbital list from this one parse. Optional lines replace the file
+    contents; relative basis paths still resolve beside indmftpr."""
+    if lines is None:
+        with open(indmftpr) as fh:
+            lines = fh.readlines()
+    raw = [l.split('!')[0].strip() for l in lines]
     raw = [l for l in raw if l != '']
     nsort = int(raw[0].split()[0])
     mult = [int(x) for x in raw[1].split()][:nsort]
@@ -426,7 +432,7 @@ def read_dmftsym(path, rotloc=False):
 
 # --- almblm parsing ----------------------------------------------------------
 
-def read_almblm(path, info, projectors=False):
+def read_almblm(path, info, projectors=False, *, lines=None):
     """Read one spin's almblm file in the dmftproj.f read order.
 
     With projectors=False keep only the header (elecn, nk, nloat, eferm), the
@@ -437,14 +443,14 @@ def read_almblm(path, info, projectors=False):
 
     With projectors=True also accumulate the per-(l,m) Alm/Blm/Clm coefficients
     in the canonical Wien2k packing lm = l*l + (m+l), for every atom of every
-    sort (ctqmcout/parproj)."""
+    sort (ctqmcout/parproj). Optional lines replace the file contents."""
     nsort = info['nsort']
     lmax = info['lmax']
     mult = info['mult']
     nlm = (lmax + 1) ** 2
     natom = sum(mult)
 
-    r = Reader(path)
+    r = Reader(path, lines=lines)
     elecn = to_float(r.record()[0])
     nk = int(r.record()[0])
     r.record()                         # nloat
