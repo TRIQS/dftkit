@@ -45,7 +45,8 @@ fixture with the native Fortran producer: the two `almblm` files, `struct`,
 `dmftsym`, `indmftpr`, and retained `case.cf_d_eg_t2g` basis template. The
 original cubic basis is preserved. The fixture was regenerated with the native
 CMake producer (GNU Fortran 15.3.0) from upstream `43435dc`; the converter
-reference uses TRIQS 4.0.2. Use the producer built from this repository:
+reference uses TRIQS 4.0.2. To reproduce the historical native fixture, build
+the producer from upstream commit `43435dc` and run:
 
 ```sh
 mkdir -p wienroot/SRC_templates CaOs2

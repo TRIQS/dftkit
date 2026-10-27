@@ -24,7 +24,7 @@ cmake_policy(VERSION ${CMAKE_VERSION})
 
 # ############
 # Define Project
-project(triqs_dftkit VERSION 4.0.0 LANGUAGES CXX Fortran)
+project(triqs_dftkit VERSION 4.0.0 LANGUAGES CXX)
 get_directory_property(IS_SUBPROJECT PARENT_DIRECTORY)
 
 # version displayed in the documentation
@@ -106,8 +106,6 @@ include(GNUInstallDirs)
 # Find / Build dependencies
 add_subdirectory(deps)
 
-# Build and install the dmftproj executable
-add_subdirectory(fortran/dmftproj)
 
 # Command line scripts (init_dmftpr generates dmftproj's input file)
 add_subdirectory(bin)
