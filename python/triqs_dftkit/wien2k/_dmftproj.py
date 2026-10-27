@@ -304,9 +304,17 @@ def _nonmixing_matrix(op, shell, ti):
     return mat
 
 
-def shell_matrix(op, shell, ti):
-    """Spinor symmetry matrix for one shell under one operation."""
+def shell_matrix(op, shell, ti, ifSO=True):
+    """Spinor or orbital symmetry matrix for one shell under one operation."""
+    if shell['mixing'] and not ifSO:
+        raise NotImplementedError('spin-mixing bases without spin-orbit coupling are not implemented')
     l = shell['l']
+    if not ifSO:
+        if l == 0:
+            return np.array([[1.0 + 0j]], dtype=complex)
+        P = shell['P']
+        rotl = dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
+        return P @ rotl @ np.conj(P.T)
     if l == 0:
         return _l0_matrix(op, ti)
     if shell['mixing']:
@@ -617,7 +625,7 @@ def require_identity_struct(case):
 def validate_so_windows(spins, info, windows, below=None):
     """Require valid selected windows and the same absolute bands in both spins."""
     if len(spins) != 2:
-        raise ValueError('spin-orbit projectors require both up and down almblm files')
+        raise ValueError('two-spin projectors require both up and down almblm files')
     bw = band_index_window(info, spins) if info['proj_mode'] else None
     for spin in spins[1:]:
         if spin['nk'] != spins[0]['nk']:
@@ -626,11 +634,11 @@ def validate_so_windows(spins, info, windows, below=None):
             selected = (select_window(kp['nbmin'], kp['nbmax'], kp['eband'], info['e_bot'], info['e_top'])
                         if bw is None else select_band_window(kp['nbmin'], kp['nbmax'], *bw))
             if selected != windows[ik]:
-                raise ValueError('spin-orbit run requires identical up/dn band windows')
+                raise ValueError('projector run requires identical up/dn band windows')
             if below is not None:
                 lower = (select_window(kp['nbmin'], kp['nbmax'], kp['eband'], -1e6, info['e_bot'])
                          if bw is None else select_band_window(kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
                 if lower != below[ik]:
-                    raise ValueError('spin-orbit run requires identical up/dn below-window bands')
+                    raise ValueError('projector run requires identical up/dn below-window bands')
     if not all(incl and lo <= hi for incl, lo, hi in windows):
         raise ValueError('projectors require a nonempty included window at every k-point')

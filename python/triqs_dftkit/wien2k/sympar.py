@@ -39,13 +39,15 @@ at the top, no ifsplit/irep sub-block selection (always the full matrix), and
 no crorb%ifSOat/correp metadata. It is purely group-theoretic: header, perms,
 timeflag line, and the representation matrices.
 
-Only the spin-orbit case is implemented (indmftpr SO flag=1, which implies
-ifSP): 2*(2l+1)-wide spinor matrices with the timeflag line. The non-SO layouts
-(scalar l=0 entries, paramagnetic time-reversal tail) raise
-NotImplementedError. The reference case is CaOs2 (SP+SO).
+Spin-orbit runs write 2*(2l+1)-wide spinor matrices. Without spin-orbit
+coupling, the matrices have width 2l+1, with scalar s-shell entries and a
+paramagnetic time-reversal tail when the input is not spin-polarized.
 """
 
-from ._dmftproj import (read_dmftsym, read_fromfile, read_indmftpr, reptrans,
+import os
+import numpy as np
+
+from ._dmftproj import (fmt, tmat, read_dmftsym, read_fromfile, read_indmftpr, reptrans,
                         shell_matrix, write_row)
 
 _shell_matrix = shell_matrix
@@ -85,28 +87,51 @@ def _write_matrix(f, mat):
 def write_sympar(case):
     """Write <case>.sympar from <case>.dmftsym and <case>.indmftpr.
 
-    Spin-orbit only (indmftpr SO flag=1, implying ifSP): writes the timeflag
-    line and the 2*(2l+1)-wide spinor matrices."""
+    Detects ifSP/ifSO from the presence of <case>.almblm{up,dn} and the indmftpr
+    SO flag, exactly as oubwin/symqmc/ctqmcout. For SP+SO the file carries the
+    timeflag line and 2*(2l+1)-wide block-diag spinor matrices; the paramagnetic
+    time-reversal tail is written only when .not.ifSP."""
     info = read_indmftpr(case + '.indmftpr')
-    if not info['so']:
-        raise NotImplementedError('non-spin-orbit sympar is not implemented yet')
-    shells = _included_shells(info)
+    shells, so = _included_shells(info), info['so']
     nsym, ops = read_dmftsym(case + '.dmftsym')
     natom = len(ops[0]['perm'])
+
+    ifSP = os.path.exists(case + '.almblmup') and os.path.exists(case + '.almblmdn')
+    ifSO = bool(so)
+    ifSP = ifSP or ifSO                      # ifSO => ifSP
 
     timeflag = []
     for op in ops:
         det2 = (op['krotm'][0, 0] * op['krotm'][1, 1]
                 - op['krotm'][0, 1] * op['krotm'][1, 0])
-        timeflag.append(1 if det2 < 0.0 else 0)
+        timeflag.append(1 if (ifSO and det2 < 0.0) else 0)
 
     with open(case + '.sympar', 'w') as f:
         f.write('%6d %6d\n' % (nsym, natom))
         for op in ops:
             f.write(''.join('%6d ' % p for p in op['perm']) + '\n')
-        f.write(''.join('%6d ' % t for t in timeflag) + '\n')
+        if ifSP:
+            f.write(''.join('%6d ' % t for t in timeflag) + '\n')
 
         for isym, op in enumerate(ops):
-            ti = bool(timeflag[isym])
             for sh in shells:
-                _write_matrix(f, _shell_matrix(op, sh, ti))
+                l = sh['l']
+                ti = bool(timeflag[isym])
+                if l == 0 and not (ifSP and ifSO):
+                    f.write(fmt(1.0) + '\n')
+                    f.write(fmt(0.0) + '\n')
+                    continue
+                _write_matrix(f, _shell_matrix(op, sh, ti, ifSO))
+
+        if not ifSP:
+            for sh in shells:
+                l = sh['l']
+                if l == 0:
+                    f.write(fmt(1.0) + '\n')
+                    f.write(fmt(0.0) + '\n')
+                    continue
+                tm = tmat(l)
+                op = sh['P'] @ tm @ sh['P'].T
+                ident = np.eye(2 * l + 1, dtype=complex)
+                time_op = op @ np.conj(ident)
+                _write_matrix(f, time_op)
