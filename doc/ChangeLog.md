@@ -12,6 +12,7 @@ this section to the version number when the next release is cut.
 * Run DMFT on the irreducible Brillouin zone: `convert_dft_input(use_ibz=...)` reduces the data to the irreducible k-points, sets `symm_op = 1` and writes the correlated-shell symmetry operations (real-harmonic rotations for `l = 0, 1, 2` and atom permutations, built from the space group in `vaspout.h5`) to `dft_symmcorr_input`, so that DFTTools and ModEST restore the full-BZ average by symmetrization. Enabled by default when VASP used symmetry and `vaspout.h5` holds the symmetry data, and only when it is known to work: correlated shells with `l <= 2`, a symmetry-closed orbital set with an orthonormal `TRANSFORM`, all equivalent atoms projected, no spin-orbit coupling, and the symmetrized IBZ occupation and local levels reproduce the full grid within `ibz_tol` (1e-3). Otherwise the converter falls back to the full grid with a note; `use_ibz=True` raises instead. The VASP `Driver` passes `use_ibz` through for CSC runs
 
 ### Wien2k
+* Add pure-Python band-mode projectors, projection modes 1/2, and custom `fromfile` bases, including spin-mixing bases, to the Wien2k projector generators
 * Read the high-symmetry k-path labels from the end of `case.outband` and store them as `kpts_labels` / `kpts_labels_idx` in `dft_bands_input`, matching the VASP band conversion
 
 ### test

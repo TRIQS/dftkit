@@ -93,3 +93,17 @@ The Python generator uses exact cubic d coefficients and double-precision
 phases; its generated matrices are checked for unitarity at `1e-12`.
 It writes only into a temporary directory, so the converter tests always
 read the original native fixture.
+
+## Double-precision generator references
+
+The separate generator comparisons in `wien2k_ctqmcout_python.py`,
+`wien2k_parproj_python.py`, `wien2k_sympar_python.py` and
+`wien2k_outband_python.py` use the precision-corrected native producer.
+Their cubic-d references require a full-precision `case.cf_d_eg_t2g` in
+`$WIENROOT/SRC_templates`. Replace the eight-digit `0.70710678` coefficients
+with `0.70710678118654752440` (preserving their signs and all other entries)
+before regenerating those references. The Python cubic basis uses the same
+double-precision coefficients. The eight-digit template can leave differences
+of about `7e-9`, exceeding the generator tests' absolute tolerance of `1e-11`.
+This requirement applies to the full-rank generator references; retain the
+original template when reproducing the historical converter fixture above.

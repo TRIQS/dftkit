@@ -31,10 +31,8 @@ covers ALL INCLUDED shells (l_inc in {1,2}), iterating orb(1:norb) instead of
 crorb(1:ncrorb). The orb ordering is (sort, l, atom) per dmftproj.f:357-387.
 
 The per-shell basis transmat is per sort: a complex shell uses the exact
-identity, a cubic shell uses the single-precision CMPLX cast of the cubic-d
-harmonics (set_ang_trans.f:146), giving 0.70710676908 for 1/sqrt2 — the same
-truncation ctqmcout carries. Mixed within one file (Ca complex exact, Os cubic
-truncated for CaOs2).
+identity, a cubic shell uses the exact double-precision cubic-d harmonics, as
+ctqmcout does. Mixed within one file (Ca complex, Os cubic for CaOs2).
 
 sympar drops three things symqmc/ctqmcout carry: no orbital-description block
 at the top, no ifsplit/irep sub-block selection (always the full matrix), and
@@ -42,216 +40,58 @@ no crorb%ifSOat/correp metadata. It is purely group-theoretic: header, perms,
 timeflag line, and the representation matrices.
 
 Only the spin-orbit case is implemented (indmftpr SO flag=1, which implies
-ifSP): the non-mixing 2*(2l+1)-wide block-diag spinor path with the timeflag
-line. The non-SO layouts (scalar l=0 entries, paramagnetic time-reversal tail)
-raise NotImplementedError. The reference case is CaOs2 (SP+SO).
+ifSP): 2*(2l+1)-wide spinor matrices with the timeflag line. The non-SO layouts
+(scalar l=0 entries, paramagnetic time-reversal tail) raise
+NotImplementedError. The reference case is CaOs2 (SP+SO).
 """
 
-import math
-import numpy as np
+from ._dmftproj import (read_dmftsym, read_fromfile, read_indmftpr, reptrans,
+                        shell_matrix, write_row)
+
+_shell_matrix = shell_matrix
 
 
-# --- angular bases -----------------------------------------------------------
-# transpose(P) = <new|m>, m = -l..l. dmftproj stores cubic/fromfile coefficients
-# via a single-precision CMPLX cast (set_ang_trans.f:146); reproduce the
-# float32 truncation so the written numbers match (0.70710676908 for 1/sqrt2).
-# A complex basis is the exact identity (no cast).
+# --- included shells ---------------------------------------------------------
 
-_CUBIC = {
-    1: np.array([[2 ** -0.5, 0, -(2 ** -0.5)],
-                 [-1j * 2 ** -0.5, 0, -1j * 2 ** -0.5],
-                 [0, 1, 0]], dtype=complex),
-    2: np.array([
-        [0, 0, 1, 0, 0],
-        [2 ** -0.5, 0, 0, 0, 2 ** -0.5],
-        [-(2 ** -0.5), 0, 0, 0, 2 ** -0.5],
-        [0, 2 ** -0.5, 0, -(2 ** -0.5), 0],
-        [0, 2 ** -0.5, 0, 2 ** -0.5, 0],
-    ], dtype=complex),
-}
-
-
-def _reptrans(basis, l):
-    if basis == 'cubic' and l in _CUBIC:
-        return _CUBIC[l].astype(np.complex64).astype(np.complex128)
-    if basis == 'cubic' and l != 0:
-        raise NotImplementedError('cubic f-shell sympar is not implemented yet')
-    return np.eye(2 * l + 1, dtype=complex)
-
-
-# --- Wigner D matrix (dmftproj convention, setsym.f) -------------------------
-
-def _small_d(l, m, n, b):
-    f1 = (math.factorial(l + m) * math.factorial(l - m)) / \
-         (math.factorial(l + n) * math.factorial(l - n))
-    s = 0.0
-    for t in range(0, 2 * l + 1):
-        if (l - m - t) >= 0 and (l - n - t) >= 0 and (t + n + m) >= 0:
-            f2 = (math.factorial(l + n) * math.factorial(l - n)) / \
-                 (math.factorial(l - m - t) * math.factorial(m + n + t) *
-                  math.factorial(l - n - t) * math.factorial(t))
-            f3 = 1.0 if (2 * l - m - n - 2 * t) == 0 \
-                else math.sin(b / 2) ** (2 * l - m - n - 2 * t)
-            f4 = 1.0 if (2 * t + n + m) == 0 \
-                else math.cos(b / 2) ** (2 * t + n + m)
-            s += (-1) ** (l - m - t) * f2 * f3 * f4
-    return math.sqrt(f1) * s
-
-
-def _dmat(l, a, b, c, det):
-    D = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        for n in range(-l, l + 1):
-            v = np.exp(1j * n * a) * np.exp(1j * m * c) * _small_d(l, m, n, b)
-            if det < -0.5:
-                v *= (-1) ** l
-            D[m + l, n + l] = v
-    return D
-
-
-def _tmat(l):
-    """T[m, -m] = (-1)^m, complex conjugation in the |lm> basis (timeinv.f)."""
-    T = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
-    for m in range(-l, l + 1):
-        T[-m + l, m + l] = (-1) ** m
-    return T
-
-
-def _timeinv_orbital(l, mat):
-    return _tmat(l) @ np.conj(mat)
-
-
-# --- inputs ------------------------------------------------------------------
-
-def _read_indmftpr(indmftpr):
-    """Return one entry per INCLUDED shell (l_inc in {1,2}), one per atom of its
-    sort, in orb order (sort, l, atom). Each shell carries l, basis name and the
-    transform P. Also returns the SO flag."""
-    raw = [l.split('!')[0].strip() for l in open(indmftpr)]
-    raw = [l for l in raw if l != '']
-    nsort = int(raw[0].split()[0])
-    mult = [int(x) for x in raw[1].split()][:nsort]
-    i = 3
-    so = 0
-    seen_correlated = False
+def _included_shells(info):
+    """One entry per INCLUDED shell (l_inc in {1,2}), one per atom of its sort,
+    in orb order (sort, l, atom). Each shell carries l, basis name, a mixing
+    flag and the transform P: a spin-coupling fromfile basis gives the full
+    2(2l+1) P (P spinrot P^dag matrix), otherwise the (2l+1) up/up block."""
     shells = []
-    for isort in range(nsort):
-        basis = raw[i].split()[0]
-        i += 1
-        if basis == 'fromfile':
-            i += 1
-        l_inc = [int(x) for x in raw[i].split()]
-        i += 1
-        ireps = [int(x) for x in raw[i].split()]
-        i += 1
-        correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
-        included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
-        for l in correlated_ls:
-            if ireps[l] > 1 or (ireps[l] == 1 and raw[i].strip() != '1'):
-                raise NotImplementedError('selection of individual irreducible representations is not implemented')
-            if ireps[l] > 0:
-                i += 1
-        if correlated_ls:
-            sort_so = int(raw[i].split()[0])
-            if sort_so not in (0, 1):
-                raise ValueError('spin-orbit flags must be 0 or 1')
-            if seen_correlated and sort_so != so:
-                raise NotImplementedError('different spin-orbit flags across correlated sorts are not implemented')
-            so = sort_so
-            seen_correlated = True
-            i += 1
-        for l in included_ls:
-            P = _reptrans(basis, l)
-            for imu in range(1, mult[isort] + 1):
-                atom = sum(mult[:isort]) + imu
+    for isort in range(info['nsort']):
+        s = info['sorts'][isort]
+        for l in s['included_ls']:
+            if s['basis'] == 'fromfile':
+                P, mixing = read_fromfile(s['sourcefile'], l)
+            else:
+                P, mixing = reptrans(s['basis'], l), False
+            for imu in range(1, info['mult'][isort] + 1):
+                atom = sum(info['mult'][:isort]) + imu
                 shells.append(dict(l=l, sort=isort + 1, atom=atom,
-                                   basis=basis, P=P))
-    return shells, so
-
-
-def _read_dmftsym(path):
-    lines = open(path).read().split('\n')
-    nsym = int(lines[0].split()[0])
-    perms = [[int(x) for x in lines[1 + i].split()] for i in range(nsym)]
-    starts = [i for i, l in enumerate(lines) if 'Sym. op.' in l]
-    ops = []
-    for k, s in enumerate(starts[:nsym]):
-        toks = lines[s + 1].split()
-        a, b, c = (math.radians(float(x)) for x in toks[:3])
-        krotm = np.array([[float(x.replace('D', 'E').replace('d', 'e'))
-                           for x in lines[s + 2 + r].split()] for r in range(3)])
-        ops.append(dict(perm=perms[k], a=a, b=b, c=c, iprop=int(toks[3]),
-                        krotm=krotm))
-    return nsym, ops
-
-
-# --- matrix construction (shared with symqmc) --------------------------------
-
-def _phase(op, ti):
-    a, c = op['a'], op['c']
-    return (c - a) if ti else (a + c)       # (g-a) on magnetic ops, else (a+g)
-
-
-def _l0_matrix(op, ti):
-    e = np.exp(1j * _phase(op, ti) / 2)
-    return np.array([[e, 0], [0, np.conj(e)]], dtype=complex)
-
-
-def _nonmixing_matrix(op, shell, ti):
-    """Non-mixing SP+SO whole shell: the up/up block scaled by +-(a+g)/2,
-    block-diagonal over spin, with the orbital time-reversal operator on the
-    magnetic operations (setsym.f, outputqmc.f:1292-1339)."""
-    l, P = shell['l'], shell['P']
-    rotl = _dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
-    if ti:
-        rotl = _timeinv_orbital(l, rotl)
-    rotrep = P @ rotl @ np.conj(P.T)
-    e = np.exp(1j * _phase(op, ti) / 2)
-    d = 2 * l + 1
-    mat = np.zeros((2 * d, 2 * d), dtype=complex)
-    mat[:d, :d] = e * rotrep
-    mat[d:, d:] = np.conj(e) * rotrep
-    return mat
-
-
-def _shell_matrix(op, shell, ti):
-    l = shell['l']
-    if l == 0:
-        return _l0_matrix(op, ti)
-    return _nonmixing_matrix(op, shell, ti)
+                                   basis=s['basis'], P=P, mixing=mixing))
+    return shells
 
 
 # --- output ------------------------------------------------------------------
 
-def _fmt(x):
-    """One gfortran list-directed real (leading sign space, ~17 sig figs)."""
-    return '  %.16E' % float(x)
-
-
-def _w(f, arr):
-    f.write(''.join(_fmt(x) for x in arr) + '\n')
-
-
 def _write_matrix(f, mat):
     for m in range(mat.shape[0]):
-        _w(f, mat[m, :].real)
+        write_row(f, mat[m, :].real)
     for m in range(mat.shape[0]):
-        _w(f, mat[m, :].imag)
+        write_row(f, mat[m, :].imag)
 
 
 def write_sympar(case):
     """Write <case>.sympar from <case>.dmftsym and <case>.indmftpr.
 
     Spin-orbit only (indmftpr SO flag=1, implying ifSP): writes the timeflag
-    line and 2*(2l+1)-wide block-diag spinor matrices."""
-    shells, so = _read_indmftpr(case + '.indmftpr')
-    if not so:
+    line and the 2*(2l+1)-wide spinor matrices."""
+    info = read_indmftpr(case + '.indmftpr')
+    if not info['so']:
         raise NotImplementedError('non-spin-orbit sympar is not implemented yet')
-    if any(sh['basis'] == 'fromfile' for sh in shells):
-        raise NotImplementedError(
-            'sympar for fromfile/mixing bases is not yet covered by a test '
-            'fixture; cubic and complex bases are supported')
-    nsym, ops = _read_dmftsym(case + '.dmftsym')
+    shells = _included_shells(info)
+    nsym, ops = read_dmftsym(case + '.dmftsym')
     natom = len(ops[0]['perm'])
 
     timeflag = []

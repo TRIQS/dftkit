@@ -9,7 +9,8 @@
 # an uncorrelated Ca d-shell. Inputs are the shared CaOs2 almblm/struct/dmftsym
 # renamed to the CaOs2_partial case.
 #
-# Floats compared at 1e-7 (dmftproj single-precision basis-transform floor).
+# Floats compared at 1e-11 against native dmftproj output (full-precision
+# cubic-d template).
 
 import gzip
 import os
@@ -38,14 +39,22 @@ def _compare(got_path, ref_lines):
         else:
             floats.append((float(a), float(b)))
     a, b = np.array(floats).T
-    np.testing.assert_allclose(a, b, atol=1e-7, rtol=0, equal_nan=False)
+    np.testing.assert_allclose(a, b, atol=1e-11, rtol=0, equal_nan=False)
 
 
-def _check(case):
+def _check(case, mode=0):
     tmp = tempfile.mkdtemp()
     try:
         shutil.copy(os.path.join(HERE, f'{case}.indmftpr'),
                     os.path.join(tmp, f'{case}.indmftpr'))
+        if mode:
+            path = os.path.join(tmp, f'{case}.indmftpr')
+            with open(path) as fh:
+                lines = fh.read().splitlines()
+            lines[-1] = lines[-1] + ' 1' if mode == 1 else '60 76 2'
+            with open(path, 'w') as fh:
+                fh.write('\n'.join(lines) + '\n')
+        shutil.copy(os.path.join(HERE, 'jbasis_d.dat'), os.path.join(tmp, 'jbasis_d.dat'))
         for ext in ('struct', 'dmftsym'):
             shutil.copy(os.path.join(HERE, f'CaOs2.{ext}'),
                         os.path.join(tmp, f'{case}.{ext}'))
@@ -71,16 +80,18 @@ for shell in raw:
         np.testing.assert_allclose(actual, expected, atol=1e-14, rtol=0)
 
 _check('CaOs2_partial')
-
-with tempfile.TemporaryDirectory() as tmp:
-    path = os.path.join(tmp, 'P1.dmftsym')
-    with open(path, 'w') as fh:
-        fh.write('1\n1 2\nSym. op. 1\n0 0 0 1\n'
-                 '1 0 0\n0 1 0\n0 0 1\nGlobal->local\n'
-                 '1\n1 0 0\n0 1 0\n0 0 1\n0 0 0 1\n'
-                 '2\n1 0 0\n0 1 0\n0 0 1\n90 0 0 1\n')
-    _, _, refs = parproj._read_dmftsym(path)
-    assert len(refs) == 2
-    np.testing.assert_allclose(refs[1]['a'], np.pi / 2, atol=1e-14, rtol=0)
+_check('CaOs2_jbasis_full')
+# All definitions select bands 60..76 here; the partial projectors and
+# below-window density must match the native energy-window reference.
+_check('CaOs2_partial', mode=1)
+_check('CaOs2_partial', mode=2)
 
 print('wien2k_parproj_python: ok')
+
+# Equivalent atoms must share the average after identity and swap operations.
+raw_mixing = {1: np.diag([1., 3.]), 2: np.diag([5., 7.])}
+actual = parproj._symmetrize_densmat_mixing(
+    [dict(atom=1), dict(atom=2)], [dict(perm=[1, 2]), dict(perm=[2, 1])], 2,
+    [(np.eye(2), False)] * 2, raw_mixing)
+for matrix in actual.values():
+    np.testing.assert_allclose(matrix, np.diag([3., 5.]), atol=1e-14, rtol=0)

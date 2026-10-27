@@ -18,6 +18,7 @@ import tempfile
 import numpy as np
 
 from triqs_dftkit.wien2k import oubwin
+from triqs_dftkit.wien2k import _dmftproj as dp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -48,8 +49,8 @@ for nbmin, energies, expected in (
         (10, [0., 0.5, 1., 2.], (True, 11, 12)),   # strict lower, inclusive upper
         (10, [0.5, 1.], (True, 10, 11)),           # open window reaches nbmax
         (10, [-1., 0., 2.], (False, 0, 0))):       # no in-window band
-    got = oubwin._select_window(nbmin, nbmin + len(energies) - 1,
-                                np.array(energies), 0., 0., 1.)
+    got = dp.select_window(nbmin, nbmin + len(energies) - 1,
+                                np.array(energies), 0., 1.)
     assert got == expected, (energies, got, expected)
 
 # Three k-points with distinct weights, a Fermi shift of 10 Ry, and one
@@ -58,31 +59,17 @@ for nbmin, energies, expected in (
 with tempfile.TemporaryDirectory() as tmp:
     almblm = os.path.join(tmp, 'case.almblm')
     with open(almblm, 'w') as f:
-        f.write('''0
-3
-0
-10.0
-1.0
-0
-IK = 1
-0 0 0
-1 10 13
-0.25 9.0
-0.80 10.25
-0.60 10.75
-0.25 12.0
-IK = 2
-0 0 0
-2 20 21
-0.10 8.0
-0.10 9.0
-IK = 3
-0 0 0
-3 30 31
-0.75 10.25
-0.50 10.75
-''')
-    windows = oubwin._windows_for_spin(almblm, None, 1, 0, 0., 1., 0)
+        f.write('0\n3\n0\n10.0\n1.0\n0\n')
+        for ik, nbmin, energies, weights in (
+                (1, 10, [9., 10.25, 10.75, 12.], [.25, .80, .60, .25]),
+                (2, 20, [8., 9.], [.10, .10]),
+                (3, 30, [10.25, 10.75], [.75, .50])):
+            f.write(f'IK = {ik}\n0 0 0\n{ik} {nbmin} {nbmin + len(energies) - 1}\n')
+            for energy, weight in zip(energies, weights):
+                f.write(f'{weight} {energy}\n')
+            f.write('ATOM = 1\n1\n')
+            f.write('(0.,0.) (0.,0.)\n' * len(energies))
+    windows = oubwin._windows_from_spin(dp.read_almblm(almblm, dict(nsort=1, lmax=0, mult=[1])), dict(proj_mode=0, e_bot=0., e_top=1.), None)
     assert windows == [(True, 11, 12, 0.25), (False, 0, 0, 0.10),
                        (True, 30, 31, 0.75)], windows
     output = os.path.join(tmp, 'case.oubwin')
@@ -93,14 +80,5 @@ IK = 3
             ['0'], ['1'], ['30', '31'], ['0.7500000000000000']]
 
 _check('CaOs2')
-
-with tempfile.TemporaryDirectory() as tmp:
-    path = os.path.join(tmp, 'multi.indmftpr')
-    with open(path, 'w') as fh:
-        fh.write('1\n1\n2\ncomplex\n0 2 2\n0 1 1\n1\n1\n0\n-2 3\n')
-    assert oubwin._read_so_flag(path) == 0
-    with open(path, 'a') as fh:
-        fh.write('-2 3 ! default energy-window mode\n')
-    assert oubwin._read_window(path) == (-2., 3., 0)
 
 print('wien2k_oubwin_python: ok')
