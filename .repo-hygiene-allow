@@ -1,8 +1,0 @@
-test/python/wien2k/CaOs2_pcubic.symqmc.gz	Native dmftproj cubic-p regression output from the published CaOs2 inputs retained in this repository.
-test/python/wien2k/CaOs2_noso.almblmdn.gz	Public non-SO CaOs2 regression fixture retained from TRIQS/dftkit PR #15; native producer comparison.
-test/python/wien2k/CaOs2_noso.almblmup.gz	Public non-SO CaOs2 regression fixture retained from TRIQS/dftkit PR #15; native producer comparison.
-test/python/wien2k/CaOs2_noso.ctqmcout.gz	Public non-SO CaOs2 regression fixture retained from TRIQS/dftkit PR #15; native producer comparison.
-test/python/wien2k/CaOs2_noso.symqmc.gz	Public non-SO CaOs2 regression fixture retained from TRIQS/dftkit PR #15; native producer comparison.
-test/python/wien2k/CaOs2_noso_partial.parproj.gz	Public non-SO CaOs2 regression fixture retained from TRIQS/dftkit PR #15; native producer comparison.
-test/python/wien2k/CaOs2_noso_partial.sympar.gz	Public non-SO CaOs2 regression fixture retained from TRIQS/dftkit PR #15; native producer comparison.
-test/python/wien2k/CaOs2_noso_partial_paramag.parproj.gz	Native paramagnetic CaOs2 regression generated from the public PR #15 non-SO up-channel input and partial-projector configuration.

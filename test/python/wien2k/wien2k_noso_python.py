@@ -13,11 +13,11 @@
 # CaOs2_noso is the spin-polarized, non-SO CaOs2 (indmftpr SO flag 0, wide
 # window -2.0 3.0): two equivalent Os d shells, cubic harmonics. The wide window
 # keeps the Loewdin overlap full rank. ctqmcout and symqmc are checked against
-# the precision-fixed dmftproj reference for this case.
+# the native dmftproj reference for this case.
 #
 # CaOs2_noso_partial adds an uncorrelated Ca d shell, so sympar and parproj have
 # an included-but-not-correlated shell to symmetrize. Same struct/dmftsym/almblm
-# as the correlated-only case. References built with the precision-fixed
+# as the correlated-only case. References built with the native
 # dmftproj run without -so.
 #
 # The _paramag references use only the up-channel almblm as case.almblm (native

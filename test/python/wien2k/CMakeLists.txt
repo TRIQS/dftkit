@@ -94,7 +94,7 @@ set_property(TEST Py_wien2k_outband_python APPEND PROPERTY ENVIRONMENT
 
 # Pure-Python generators on the non-spin-orbit path (ifSO=0, the common DMFT
 # case): dmftproj writes (2l+1) matrices, per-spin orthonormalization. Validated
-# against the precision-fixed dmftproj run without -so. Reuses CaOs2.struct/dmftsym.
+# against the native dmftproj run without -so. Reuses CaOs2.struct/dmftsym.
 file(COPY CaOs2_noso.indmftpr CaOs2_noso.almblmup.gz CaOs2_noso.almblmdn.gz
           CaOs2_noso.ctqmcout.gz CaOs2_noso.symqmc.gz
           CaOs2_noso_partial.indmftpr CaOs2_noso_partial.sympar.gz CaOs2_noso_partial.parproj.gz
