@@ -19,6 +19,9 @@
 # an included-but-not-correlated shell to symmetrize. Same struct/dmftsym/almblm
 # as the correlated-only case. References built with the precision-fixed
 # dmftproj run without -so.
+#
+# The _paramag references use only the up-channel almblm as case.almblm (native
+# dmftproj without -sp). CaOs2_noso_s correlates the Ca s shell as well.
 
 import gzip
 import os
@@ -88,9 +91,23 @@ _check_output('CaOs2_noso', 'symqmc', symqmc.write_symqmc)
 _check_output('CaOs2_noso_partial', 'sympar', sympar.write_sympar)
 _check_output('CaOs2_noso_partial', 'parproj', parproj.write_parproj)
 
-# A single non-magnetic input carries one density block and no spin flag.
+# A single non-magnetic input carries one density block and no spin flag; the
+# symmetry files end with the paramagnetic time-reversal operator.
 _check_output('CaOs2_noso_partial', 'parproj', parproj.write_parproj,
               paramagnetic=True)
+_check_output('CaOs2_noso_partial', 'sympar', sympar.write_sympar,
+              paramagnetic=True)
+_check_output('CaOs2_noso', 'ctqmcout', ctqmcout.write_ctqmcout,
+              paramagnetic=True)
+_check_output('CaOs2_noso', 'symqmc', symqmc.write_symqmc, paramagnetic=True)
+
+# Correlated Ca s shell next to Os d: the scalar s-shell matrices, with and
+# without spin polarization.
+for ext, writer in (('symqmc', symqmc.write_symqmc), ('sympar', sympar.write_sympar)):
+    _check_output('CaOs2_noso_s', ext, writer)
+for ext, writer in (('ctqmcout', ctqmcout.write_ctqmcout),
+                    ('symqmc', symqmc.write_symqmc), ('sympar', sympar.write_sympar)):
+    _check_output('CaOs2_noso_s', ext, writer, paramagnetic=True)
 
 # Shells with different l on one atom remain independent in the non-SO path.
 orbs = [dict(atom=1, sort=1, l=l) for l in (0, 1)]

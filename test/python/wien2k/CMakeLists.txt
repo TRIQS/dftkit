@@ -99,6 +99,11 @@ file(COPY CaOs2_noso.indmftpr CaOs2_noso.almblmup.gz CaOs2_noso.almblmdn.gz
           CaOs2_noso.ctqmcout.gz CaOs2_noso.symqmc.gz
           CaOs2_noso_partial.indmftpr CaOs2_noso_partial.sympar.gz CaOs2_noso_partial.parproj.gz
           CaOs2_noso_partial_paramag.parproj.gz
+          CaOs2_noso_paramag.ctqmcout.gz CaOs2_noso_paramag.symqmc.gz
+          CaOs2_noso_partial_paramag.sympar.gz
+          CaOs2_noso_s.indmftpr CaOs2_noso_s.symqmc.gz CaOs2_noso_s.sympar.gz
+          CaOs2_noso_s_paramag.ctqmcout.gz CaOs2_noso_s_paramag.symqmc.gz
+          CaOs2_noso_s_paramag.sympar.gz
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME Py_wien2k_noso_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_noso_python.py
