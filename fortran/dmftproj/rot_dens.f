@@ -64,12 +64,12 @@ C Up/dn and Dn/up terms
             ALLOCATE(rot_dmat(1:2,1:2))
             IF (rotloc(iatom)%timeinv) THEN
              factor=(rotloc(iatom)%a+rotloc(iatom)%g)/2.d0
-             tmp_mat(2,1)=EXP(CMPLX(0.d0,factor))*
+             tmp_mat(2,1)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DCOS(rotloc(iatom)%b/2.d0)
              tmp_mat(1,2)=-CONJG(tmp_mat(2,1))
 C Up/dn and Dn/up terms
              factor=-(rotloc(iatom)%a-rotloc(iatom)%g)/2.d0
-             tmp_mat(2,2)=-EXP(CMPLX(0.d0,factor))*
+             tmp_mat(2,2)=-EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DSIN(rotloc(iatom)%b/2.d0)
              tmp_mat(1,1)=CONJG(tmp_mat(2,2))
 C definition of the total density matrix
@@ -85,12 +85,12 @@ C going to the local basis
      &         rot_dmat(1:2,1:2))
             ELSE
              factor=(rotloc(iatom)%a+rotloc(iatom)%g)/2.d0
-             tmp_mat(1,1)=EXP(CMPLX(0.d0,factor))*
+             tmp_mat(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DCOS(rotloc(iatom)%b/2.d0)
              tmp_mat(2,2)=CONJG(tmp_mat(1,1))
 C Up/dn and Dn/up terms
              factor=-(rotloc(iatom)%a-rotloc(iatom)%g)/2.d0
-             tmp_mat(1,2)=EXP(CMPLX(0.d0,factor))*
+             tmp_mat(1,2)=EXP(CMPLX(0.d0,factor,KIND=8))*
      &         DSIN(rotloc(iatom)%b/2.d0)
              tmp_mat(2,1)=-CONJG(tmp_mat(1,2))
 C definition of the total density matrix

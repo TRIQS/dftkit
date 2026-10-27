@@ -505,12 +505,12 @@ C Calculation of the representation matrix of rotloc in the spin-space
 C in agreement with Wien conventions used for the definition of spmt (in SRC_lapwdm/sym.f)
 C Up/up and Dn/dn terms
                factor=(rotloc(iatomref)%a+rotloc(iatomref)%g)/2.d0
-               spmt(1,1)=EXP(CMPLX(0.d0,factor))
+               spmt(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))
      &           *DCOS(rotloc(iatomref)%b/2.d0)
                spmt(2,2)=CONJG(spmt(1,1))
 C Up/dn and Dn/up terms
                factor=-(rotloc(iatomref)%a-rotloc(iatomref)%g)/2.d0
-               spmt(1,2)=EXP(CMPLX(0.d0,factor))
+               spmt(1,2)=EXP(CMPLX(0.d0,factor,KIND=8))
      &           *DSIN(rotloc(iatomref)%b/2.d0)
                spmt(2,1)=-CONJG(spmt(1,2))
 C Up/up block :
@@ -826,7 +826,7 @@ C Up/dn block :
 C We remind that the field phase is (g-a) in this case.
 C as a result, ephase = exp(+i(g-a)/2) = -exp(+i(alpha-gamma)/2)
 C in good agreement with Wien conventions for the definition of this phase factor.
-         ephase=EXP(CMPLX(0.d0,factor))
+         ephase=EXP(CMPLX(0.d0,factor,KIND=8))
          spinrot(1:2*l+1,2*l+2:2*(2*l+1))=
      =     ephase*srot(isym)%rotl(-l:l,-l:l,l)
 C Dn/up block :
@@ -842,7 +842,7 @@ C Up/up block :
 C We remind that the field phase is (a+g) in this case.
 C as a result, ephase = exp(+i(a+g)/2)=-exp(-i(alpha+gamma)/2)
 C in good agreement with Wien conventions for the definition of this phase factor.
-         ephase=EXP(CMPLX(0.d0,factor))
+         ephase=EXP(CMPLX(0.d0,factor,KIND=8))
          spinrot(1:2*l+1,1:2*l+1)=
      =     ephase*srot(isym)%rotl(-l:l,-l:l,l)
 C Dn/dn block :
@@ -861,11 +861,11 @@ C Calculation of the representation matrix of isym in the spin-space
 C in agreement with Wien conventions used for the definition of spmt (in SRC_lapwdm/sym.f)
 C Up/up and Dn/dn terms
         factor=(srot(isym)%a+srot(isym)%g)/2.d0
-        spmt(1,1)=EXP(CMPLX(0.d0,factor))*DCOS(srot(isym)%b/2.d0)
+        spmt(1,1)=EXP(CMPLX(0.d0,factor,KIND=8))*DCOS(srot(isym)%b/2.d0)
         spmt(2,2)=CONJG(spmt(1,1))
 C Up/dn and Dn/up terms
         factor=-(srot(isym)%a-srot(isym)%g)/2.d0
-        spmt(1,2)=EXP(CMPLX(0.d0,factor))*DSIN(srot(isym)%b/2.d0)
+        spmt(1,2)=EXP(CMPLX(0.d0,factor,KIND=8))*DSIN(srot(isym)%b/2.d0)
         spmt(2,1)=-CONJG(spmt(1,2))
 C Up/up block :
         spinrot(1:2*l+1,1:2*l+1)=
