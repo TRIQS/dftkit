@@ -23,7 +23,8 @@
 # global band-index window; mode 2 ("43 92 2") takes the indices straight from
 # the window line. Both resolve to bands 43..92 (50 bands > 20 correlated
 # spin-orbitals), so the Loewdin overlap stays full rank and the projectors
-# match the native dmftproj to machine precision.
+# match the native dmftproj to machine precision. CaOs2_mode2_below ("0 92 2")
+# puts b_bot below nbmin, so no bands lie below the window and qbbot is zero.
 
 import gzip
 import os
@@ -80,6 +81,7 @@ _check('CaOs2_full')
 _check('CaOs2_jbasis_full')
 _check('CaOs2_mode1_full')            # proj_mode 1: band-index window 43..92
 _check('CaOs2_mode2_full')            # proj_mode 2: explicit band indices 43 92
+_check('CaOs2_mode2_below')           # proj_mode 2 with b_bot below nbmin
 
 print('wien2k_ctqmcout_python: ok')
 

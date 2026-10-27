@@ -72,11 +72,14 @@ assert incl and lo == 11 and hi == 13
 
 # --- band-index window (proj_mode 1/2) ---------------------------------------
 
-# set_projections.f:70-88: every k included, indices clamped to nbmin/nbmax.
+# set_projections.f:70-88: indices clamped to nbmin/nbmax.
 incl, lo, hi = dp.select_band_window(1, 92, 60, 76)
 assert incl and lo == 60 and hi == 76
 incl, lo, hi = dp.select_band_window(50, 80, 43, 92)     # clamp both ends
 assert incl and lo == 50 and hi == 80
+# the below-window (1, b_bot - 1) is empty once b_bot <= nbmin
+assert not dp.select_band_window(5, 92, 1, 4)[0]
+assert not dp.select_band_window(1, 92, 1, -1)[0]
 
 # proj_mode 2 takes b_bot/b_top straight from the (rounded) window line.
 m2 = {'proj_mode': 2, 'e_bot': 43.0, 'e_top': 92.0}

@@ -540,12 +540,13 @@ def select_window(nbmin, nbmax, eband, e1, e2):
 
 def select_band_window(nbmin, nbmax, b_bot, b_top):
     """proj_mode 1/2 band-index selection for one k-point (set_projections.f
-    70-88). e1/e2 are band indices, not energies: every k-point is included,
-    nb_bot = b_bot clamped up to nbmin (strict INT(e1) > nbmin), nb_top = b_top
-    clamped down to nbmax. Returns (included=True, nb_bot, nb_top)."""
+    70-88). b_bot/b_top are band indices, not energies: nb_bot = b_bot clamped
+    up to nbmin (strict INT(e1) > nbmin), nb_top = b_top clamped down to nbmax.
+    Returns (included, nb_bot, nb_top); included is False when the clamped
+    range is empty (nb_top < nb_bot), which contributes no bands."""
     nb_bot = b_bot if b_bot > nbmin else nbmin
     nb_top = b_top if b_top < nbmax else nbmax
-    return True, nb_bot, nb_top
+    return nb_bot <= nb_top, nb_bot, nb_top
 
 
 def band_index_window(info, spins):
