@@ -292,7 +292,10 @@ def _nonmixing_matrix(op, shell, ti):
     rotl = dmat(l, op['a'], op['b'], op['c'], float(op['iprop']))
     if ti:
         rotl = timeinv_orbital(l, rotl)
-    rotrep = P @ rotl @ np.conj(P.T)
+        # Antiunitary basis changes conjugate the source coefficients.
+        rotrep = P @ rotl @ P.T
+    else:
+        rotrep = P @ rotl @ np.conj(P.T)
     e = np.exp(1j * _phase(op, ti) / 2)
     d = 2 * l + 1
     mat = np.zeros((2 * d, 2 * d), dtype=complex)

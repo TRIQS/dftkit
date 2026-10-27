@@ -3,18 +3,20 @@
 # (GPL-3.0-or-later)
 ################################################################################
 
-# Verify the pure-Python case.symqmc generator on the two paths the spin-diagonal
+# Verify the pure-Python case.symqmc generator on the paths the spin-diagonal
 # cubic test (wien2k_symqmc_python) does not exercise:
 #
 #   - a spin-mixing fromfile basis (the |j, m_j> basis), which uses the full
 #     2(2l+1) spinor representation and the spinor time-reversal operator;
 #   - an l = 0 (s) correlated shell, the 2x2 spin phase block.
+#   - cubic p harmonics, including the complex basis change of magnetic operations.
 #
-# Both reuse the CaOs2 symmetry input (16 operations, 8 of them time-reversal).
+# These reuse the CaOs2 symmetry input (16 operations, 8 of them time-reversal).
 # The reference is the matrix data of the dmftproj case.symqmc for the same
 # input, stored in double precision and compared at 1e-11; each Python spinor
 # matrix is separately checked for unitarity.
 
+import gzip
 import os
 import shutil
 import tempfile
@@ -34,7 +36,7 @@ def _matrix_data(symqmc_path, nsym, natom):
     return np.array([float(x) for x in toks])
 
 
-def _run(indmftpr, extra=()):
+def _run(indmftpr, extra=(), ref_gz=None):
     """Generate case.symqmc in a scratch dir from the shared CaOs2 symmetry
     input and the given indmftpr, returning (matrix data, shells, ops, so)."""
     tmp = tempfile.mkdtemp()
@@ -49,6 +51,16 @@ def _run(indmftpr, extra=()):
         shells, so = symqmc._read_correlated_shells(
             case + '.indmftpr', case + '.struct')
         natom = len(ops[0]['perm'])
+        if ref_gz is not None:
+            got = open(case + '.symqmc').read().split()
+            with gzip.open(os.path.join(HERE, ref_gz), 'rt') as fh:
+                ref = fh.read().split()
+            header = 2 + nsym * natom + nsym
+            assert len(got) == len(ref)
+            assert [int(x) for x in got[:header]] == [int(x) for x in ref[:header]]
+            np.testing.assert_allclose(np.array(got[header:], dtype=float),
+                                       np.array(ref[header:], dtype=float),
+                                       atol=1e-11, rtol=0, equal_nan=False)
         return _matrix_data(case + '.symqmc', nsym, natom), shells, ops, so
     finally:
         shutil.rmtree(tmp)
@@ -64,6 +76,10 @@ def _check(indmftpr, ref_npy, extra=(), unit_tol=1e-7):
     ref = np.load(os.path.join(HERE, ref_npy))
     assert data.shape == ref.shape, (data.shape, ref.shape)
     assert np.max(np.abs(data - ref)) < 1e-11, np.max(np.abs(data - ref))
+    _check_unitary(shells, ops, so, unit_tol)
+
+
+def _check_unitary(shells, ops, so, unit_tol):
     for op in ops:
         for sh in shells:
             mat = symqmc._shell_matrix(op, sh, _timeinv(op, so))
@@ -82,5 +98,10 @@ _check('CaOs2_jbasis.indmftpr', 'wien2k_symqmc_jbasis.ref.npy',
 _, shells, _, _ = _run('CaOs2_l0.indmftpr')
 assert shells[0]['l'] == 0
 _check('CaOs2_l0.indmftpr', 'wien2k_symqmc_l0.ref.npy', unit_tol=1e-12)
+
+# Cubic p basis: full native header, all operations and both correlated atoms.
+_, shells, ops, so = _run('CaOs2_pcubic.indmftpr', ref_gz='CaOs2_pcubic.symqmc.gz')
+assert all(sh['l'] == 1 and not sh['mixing'] for sh in shells)
+_check_unitary(shells, ops, so, unit_tol=1e-12)
 
 print('wien2k_symqmc_mixing: ok')
