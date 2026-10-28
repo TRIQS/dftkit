@@ -11,13 +11,12 @@
 # f-shell symqmc here pin that sign.
 #
 # Both are the spin-orbit CaOs2 cell (two equivalent Os atoms) with the Os shell
-# promoted to a complex p or f shell. The Loewdin overlap must be full rank:
-#   p (l=1): the standard almblm, wide window -2..3 (6 spin-orbitals/atom).
-#   f (l=3): Os carries no f weight near E_F, so the projector is rank-deficient
-#     on the standard bands. CaOs2_fshell.almblm is recomputed with a high band
-#     cutoff (lapw1/lapwso EMAX raised on the converged density); the window
-#     3..10 then sits on high-energy bands with real l=3 character, full rank
-#     (overlap condition number ~1.3).
+# promoted to a complex p or f shell.
+#   p (l=1): the standard almblm, wide window -2..3 (6 spin-orbitals/atom), so
+#     the projector path (ctqmcout) is checked as well.
+#   f (l=3): only symqmc, which needs no almblm. An f projector reference needs
+#     a high-band-cutoff almblm (Os has no f weight near E_F), several MB that
+#     we keep out of the repository.
 
 import gzip
 import os
@@ -60,7 +59,7 @@ def _check(case, almblm_case, exts):
         for ext in ('struct', 'dmftsym'):
             shutil.copy(os.path.join(HERE, f'CaOs2.{ext}'),
                         os.path.join(tmp, f'{case}.{ext}'))
-        for spin in ('up', 'dn'):
+        for spin in ('up', 'dn') if almblm_case else ():
             _gunzip(os.path.join(HERE, f'{almblm_case}.almblm{spin}.gz'),
                     os.path.join(tmp, f'{case}.almblm{spin}'))
         case_path = os.path.join(tmp, case)
@@ -76,8 +75,7 @@ def _check(case, almblm_case, exts):
 _check('CaOs2_pshell', 'CaOs2',
        [('ctqmcout', ctqmcout.write_ctqmcout), ('symqmc', symqmc.write_symqmc)])
 
-# f shell: high-band-cutoff almblm, full rank on the high-energy window.
-_check('CaOs2_fshell', 'CaOs2_fshell',
-       [('ctqmcout', ctqmcout.write_ctqmcout), ('symqmc', symqmc.write_symqmc)])
+# f shell: symmetry output only.
+_check('CaOs2_fshell', None, [('symqmc', symqmc.write_symqmc)])
 
 print('wien2k_oddl_python: ok')
