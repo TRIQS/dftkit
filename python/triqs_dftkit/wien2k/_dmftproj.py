@@ -103,7 +103,9 @@ def read_two_complex(r):
 _COMPLEX = {l: np.eye(2 * l + 1, dtype=complex) for l in range(4)}
 
 _CUBIC = {
-    1: np.array([[2**-0.5, 0, -2**-0.5], [-1j*2**-0.5, 0, -1j*2**-0.5], [0, 1, 0]], dtype=complex),
+    1: np.array([[2 ** -0.5, 0, -(2 ** -0.5)],
+                 [-1j * 2 ** -0.5, 0, -1j * 2 ** -0.5],
+                 [0, 1, 0]], dtype=complex),
     2: np.array([
         [0, 0, 1, 0, 0],
         [2 ** -0.5, 0, 0, 0, 2 ** -0.5],
@@ -174,12 +176,17 @@ def small_d(l, m, n, b):
     return math.sqrt(f1) * s
 
 
-def dmat(l, a, b, c, det):
+def dmat(l, a, b, c, iprop):
+    """Rotation matrix of the l shell in the complex Y_lm basis for the Euler
+    angles (a, b, c), times the inversion parity (-1)^l when iprop = -1.
+
+    iprop is the case.dmftsym parity of the operation. krotm there holds only
+    the proper part (determinant +1), so det(krotm) cannot replace iprop."""
     D = np.zeros((2 * l + 1, 2 * l + 1), dtype=complex)
     for m in range(-l, l + 1):
         for n in range(-l, l + 1):
             v = np.exp(1j * n * a) * np.exp(1j * m * c) * small_d(l, m, n, b)
-            if det < -0.5:
+            if iprop < -0.5:
                 v *= (-1) ** l
             D[m + l, n + l] = v
     return D
@@ -256,6 +263,13 @@ def rotloc_rotl_so(l, ref, ops, iatom, iref):
     tmp[d:, d:] = np.conj(ephase) * rotl_sym
     rotl = (tmp @ np.conj(rotl)) if timeinv else (tmp @ rotl)
     return rotl, timeinv
+
+
+def rotloc_orbital(l, ref, ops, iatom, iref):
+    """Orbital part of the full local rotation R[isym] * rotloc_ref."""
+    op = next(o for o in ops if o['perm'][iref - 1] == iatom)
+    return dmat(l, op['a'], op['b'], op['g'], float(op['iprop'])) @ \
+        dmat(l, ref['a'], ref['b'], ref['g'], float(ref['iprop']))
 
 
 def mixing_rotrep(op, l, P, ti):
@@ -618,18 +632,6 @@ def write_row(f, arr):
 def fmt_scalar(x):
     x = float(x)
     return '%.16f' % x if abs(x) < 1e5 else '%.16E' % x
-
-
-def require_identity_struct(case):
-    """Fail explicitly until representative struct rotations are ported."""
-    with open(case + '.struct') as f:
-        lines = f.readlines()
-    for i, line in enumerate(lines):
-        if 'LOCAL ROT MATRIX:' in line:
-            rows = [line.split(':', 1)[1], *lines[i + 1:i + 3]]
-            rotation = np.array([[to_float(x) for x in row.split()] for row in rows])
-            if not np.allclose(rotation, np.eye(3), atol=1e-7, rtol=0):
-                raise NotImplementedError('non-identity struct local rotations are not implemented yet')
 
 
 def validate_spin_windows(spins, info, windows, below=None):

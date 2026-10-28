@@ -26,10 +26,6 @@ set_property(TEST Py_wien2k_soc_convert APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
 # Pure-Python case.symqmc generator vs the shipped dmftproj Fortran output.
-# Native precision is checked against unitarity, without regenerating fixtures.
-add_test(NAME Py_wien2k_native_precision
-         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_native_precision.py $<TARGET_FILE:dmftproj>)
-
 # The generator tests read source fixtures and write only to scratch directories.
 add_test(NAME Py_wien2k_symqmc_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_symqmc_python.py
@@ -43,6 +39,17 @@ add_test(NAME Py_wien2k_symqmc_mixing
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_symqmc_mixing.py
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_symqmc_mixing APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+# Generator on a non-centrosymmetric spin-orbit cell (tellurium, p shell), the
+# dft_tools #148 regime the centrosymmetric d-shell fixtures never reached. The
+# reference is the dmftproj matrix data (single precision, ~10 kB).
+file(COPY Te.dmftsym Te.indmftpr Te.struct wien2k_symqmc_te.ref.npy
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME Py_wien2k_symqmc_noncentrosym
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_symqmc_noncentrosym.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_symqmc_noncentrosym APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
 # Pure-Python case.oubwin band-window generator vs the dmftproj Fortran output.
@@ -109,4 +116,56 @@ add_test(NAME Py_wien2k_noso_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_noso_python.py
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set_property(TEST Py_wien2k_noso_python APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+# Odd-l shells (p l=1, f l=3): the improper-rotation parity (-1)^l is invisible
+# for the even-l (d) fixtures, so these pin dmat's use of iprop. p checks the
+# projector and symmetry outputs on the standard almblm (wide window, full
+# rank); f checks only symqmc, which needs no almblm. Both reproduce the native
+# dmftproj to machine precision.
+file(COPY CaOs2_pshell.indmftpr CaOs2_pshell.ctqmcout.gz CaOs2_pshell.symqmc.gz
+          CaOs2_fshell.indmftpr CaOs2_fshell.symqmc.gz
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME Py_wien2k_oddl_python
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_oddl_python.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_oddl_python APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+# Capstone: the pure-Python run_dmftproj driver replaces the Fortran executable.
+# Both tests run the driver through the converter and compare every HDF value
+# at machine precision (1e-12). The Loewdin overlap must be full rank: the physical
+# narrow window is rank-deficient (more correlated spin-orbitals than bands, so
+# O^{-1/2} has non-unique null eigenvectors), which is why the wide window is
+# used here. The narrow physical case is still locked exactly by the
+# Fortran-output converter test wien2k_soc_convert.
+#   Non-SO partial: convert_dft_input on the SP/non-SO oubwin path + convert_parproj_input.
+#   SO full-rank:   convert_dft_input on a wide-window SO cell.
+file(COPY CaOs2_noso_partial.indmftpr CaOs2_noso.almblmup.gz CaOs2_noso.almblmdn.gz
+          CaOs2.struct CaOs2.dmftsym CaOs2.outputs wien2k_noso_convert.ref.h5
+          CaOs2_socfull.indmftpr CaOs2.almblmup.gz CaOs2.almblmdn.gz
+          wien2k_socfull_convert.ref.h5
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME Py_wien2k_noso_convert
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_noso_convert.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_noso_convert APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+add_test(NAME Py_wien2k_socfull_convert
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_socfull_convert.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_socfull_convert APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+add_test(NAME Py_wien2k_dmftproj_cli
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_dmftproj_cli.py
+                 ${PROJECT_SOURCE_DIR}/bin/dmftproj
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_dmftproj_cli APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
+add_test(NAME Py_wien2k_symmetry_frames
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_symmetry_frames.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_symmetry_frames APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})

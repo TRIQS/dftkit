@@ -25,6 +25,8 @@ Wien2k converter
 
 from types import *
 import numpy
+
+from ._symmetry import rotate_to_local_frames
 from h5 import *
 from ..converter_tools import *
 import os.path
@@ -364,7 +366,8 @@ class Converter(ConverterTools):
         # Symmetries are used, so now convert symmetry information for
         # *correlated* orbitals:
         self.convert_symmetry_input(orbits=self.corr_shells, symm_file=self.symmcorr_file,
-                                    symm_subgrp=self.symmcorr_subgrp, SO=self.SO, SP=self.SP)
+                                    symm_subgrp=self.symmcorr_subgrp, SO=self.SO, SP=self.SP,
+                                    rot_mat=rot_mat)
         self.convert_misc_input()
 
     def convert_parproj_input(self):
@@ -470,7 +473,8 @@ class Converter(ConverterTools):
         # Symmetries are used, so now convert symmetry information for *all*
         # orbitals:
         self.convert_symmetry_input(orbits=self.shells, symm_file=self.symmpar_file,
-                                    symm_subgrp=self.symmpar_subgrp, SO=self.SO, SP=self.SP)
+                                    symm_subgrp=self.symmpar_subgrp, SO=self.SO, SP=self.SP,
+                                    rot_mat=rot_mat_all)
 
     def convert_bands_input(self):
         """
@@ -810,7 +814,7 @@ class Converter(ConverterTools):
             for it in things_to_save:
                 ar[self.transp_subgrp][it] = locals()[it]
 
-    def convert_symmetry_input(self, orbits, symm_file, symm_subgrp, SO, SP):
+    def convert_symmetry_input(self, orbits, symm_file, symm_subgrp, SO, SP, rot_mat=None):
         """
         Reads and stores symmetrisation data from symm_file, which can be is case.sympar or case.symqmc.
 
@@ -828,6 +832,10 @@ class Converter(ConverterTools):
              Is spin-orbit coupling considered?
         SP : integer
              Is the system spin-polarised?
+        rot_mat : list of ndarray, optional
+                  The local-frame rotation per orbit (rot_mat / rot_mat_all). When
+                  given, the symmetry matrices are rotated into that local solver
+                  frame.
 
         """
 
@@ -888,6 +896,11 @@ class Converter(ConverterTools):
 
         R.close()
         # Reading done!
+
+        # Symmetrization acts in each shell's local solver frame; antiunitary
+        # operations also conjugate the source-side rotation.
+        if rot_mat is not None:
+            rotate_to_local_frames(mat, perm, time_inv, orbits, rot_mat)
 
         # Save it to the HDF:
         with HDFArchive(self.hdf_file, 'a') as ar:
