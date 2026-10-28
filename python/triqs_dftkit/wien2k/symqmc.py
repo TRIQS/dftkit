@@ -46,10 +46,10 @@ A case.symqmc written by a dmftproj that casts the basis or the spin phases
 through single-precision CMPLX differs from this output at about 1e-7.
 """
 
-import numpy as np
+import os
 
-from ._dmftproj import (read_dmftsym, read_fromfile, read_indmftpr, reptrans,
-                        shell_matrix)
+from ._dmftproj import (paramag_time_op, read_dmftsym, read_fromfile, read_indmftpr,
+                        reptrans, shell_matrix)
 
 _shell_matrix = shell_matrix
 
@@ -86,26 +86,39 @@ def _read_correlated_shells(indmftpr, struct):
 
 
 def write_symqmc(case):
-    """Write <case>.symqmc from <case>.dmftsym, <case>.indmftpr, <case>.struct."""
+    """Write <case>.symqmc from <case>.dmftsym, <case>.indmftpr, <case>.struct.
+
+    ifSO comes from the indmftpr SO flag; ifSP from the presence of
+    <case>.almblm{up,dn} (ifSO => ifSP). With SO the matrices are the 2*(2l+1)
+    block-diag spinor representation and a timeflag line is written; without SO
+    they are the bare (2l+1) representation, with a timeflag line (all zero)
+    only when ifSP. The paramagnetic time-reversal tail follows when .not.ifSP."""
     nsym, ops = read_dmftsym(case + '.dmftsym')
     info = read_indmftpr(case + '.indmftpr')
     shells, so = _correlated_shells(info), info['so']
     natom = len(ops[0]['perm'])
 
+    ifSO = bool(so)
+    ifSP = (os.path.exists(case + '.almblmup')
+            and os.path.exists(case + '.almblmdn')) or ifSO
+
     timeinv = []
     for op in ops:
         det2 = op['krotm'][0, 0] * op['krotm'][1, 1] - op['krotm'][0, 1] * op['krotm'][1, 0]
-        timeinv.append(1 if (so and det2 < 0.0) else 0)
+        timeinv.append(1 if (ifSO and det2 < 0.0) else 0)
 
     with open(case + '.symqmc', 'w') as f:
         f.write('%6d %6d\n' % (nsym, natom))
         for op in ops:
             f.write(''.join('%6d ' % p for p in op['perm']) + '\n')
-        if so:
+        if ifSP:
             f.write(''.join('%6d ' % t for t in timeinv) + '\n')
         for isym, op in enumerate(ops):
             for sh in shells:
-                f.write(_format_matrix(_shell_matrix(op, sh, timeinv[isym])))
+                f.write(_format_matrix(_shell_matrix(op, sh, timeinv[isym], ifSO)))
+        if not ifSP:
+            for sh in shells:
+                f.write(_format_matrix(paramag_time_op(sh)))
 
 
 def _format_matrix(mat):

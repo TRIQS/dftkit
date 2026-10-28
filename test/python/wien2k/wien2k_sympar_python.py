@@ -70,7 +70,7 @@ def _check(case):
 inversion = dict(a=0., b=0., c=0., iprop=-1, krotm=np.eye(3))
 for l in (1, 3):
     shell = dict(l=l, mixing=False, P=np.eye(2 * l + 1, dtype=complex))
-    np.testing.assert_allclose(sympar._shell_matrix(inversion, shell, False),
+    np.testing.assert_allclose(sympar._shell_matrix(inversion, shell, False, True),
                                -np.eye(2 * (2 * l + 1)), atol=1e-14, rtol=0)
 p = sympar.reptrans('cubic', 1)
 np.testing.assert_allclose(p @ p.conj().T, np.eye(3), atol=1e-11, rtol=0)
