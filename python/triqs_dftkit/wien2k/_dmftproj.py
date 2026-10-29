@@ -227,6 +227,58 @@ def mixing_timeinv_op(l, P):
     return P @ tinv @ P.T
 
 
+def euler(R):
+    """Euler angles (a, b, c) of the proper rotation R, in the WIEN2k
+    convention of set_rotloc.f/SRC_lapwdm euler.f: R is the transpose of a
+    krotm matrix. a, c in [0, 2pi), b in [0, pi]."""
+    z = np.array([0.0, 0.0, 1.0])
+    y = np.array([0.0, 1.0, 0.0])
+    yyy = R[:, 1]
+    zz = R[:, 2]
+    yy = np.cross(z, zz)
+    y_norm = math.sqrt(yy @ yy)
+    if y_norm < 1e-10:
+        a = math.acos(max(-1.0, min(1.0, y @ yyy)))
+        if z @ zz > 0.0:
+            b = c = 0.0
+            if yyy[0] > 0.0:
+                a = 2 * math.pi - a
+        else:
+            c, a, b = a, 0.0, math.pi
+            if yyy[0] < 0.0:
+                c = 2 * math.pi - c
+        return a, b, c
+    yy = yy / y_norm
+    a = math.acos(max(-1.0, min(1.0, y @ yy)))
+    b = math.acos(max(-1.0, min(1.0, z @ zz)))
+    c = math.acos(max(-1.0, min(1.0, yy @ yyy)))
+    if yy[0] > 0.0:
+        a = 2 * math.pi - a
+    if np.cross(yy, yyy) @ zz < 0.0:
+        c = 2 * math.pi - c
+    return a, b, c
+
+
+def _rloc_spinor_s(ref, op, timeinv):
+    """2x2 spinor Rloc of an s shell under SP+SO (outputqmc.f, l=0): built
+    from the Euler angles of the composed proper rotation
+    krotm(op) krotm(ref), which fixes its SU(2) sign. For a magnetic op the
+    columns carry the time reversal -i sigma_y."""
+    a, b, g = euler((op['krotm'] @ ref['krotm']).T)
+    s = np.zeros((2, 2), dtype=complex)
+    if timeinv:
+        s[1, 0] = np.exp(1j * (a + g) / 2) * math.cos(b / 2)
+        s[0, 1] = -np.conj(s[1, 0])
+        s[1, 1] = -np.exp(-1j * (a - g) / 2) * math.sin(b / 2)
+        s[0, 0] = np.conj(s[1, 1])
+    else:
+        s[0, 0] = np.exp(1j * (a + g) / 2) * math.cos(b / 2)
+        s[1, 1] = np.conj(s[0, 0])
+        s[0, 1] = np.exp(-1j * (a - g) / 2) * math.sin(b / 2)
+        s[1, 0] = -np.conj(s[0, 1])
+    return s
+
+
 def rotloc_rotl_so(l, ref, ops, iatom, iref):
     """The composed 2(2l+1) Rloc rotation rotloc(iatom)%rotl(l) under SP+SO
     (setsym.f:496-528 + set_rotloc.f): the representative spinor rotloc
@@ -235,6 +287,12 @@ def rotloc_rotl_so(l, ref, ops, iatom, iref):
     Returns (rotl, timeinv); callers apply their own basis transform (the full
     transmat for a mixing basis, blkdiag(transmat, transmat) otherwise)."""
     d = 2 * l + 1
+    op = next(o for o in ops if o['perm'][iref - 1] == iatom)
+    det2 = (op['krotm'][0, 0] * op['krotm'][1, 1]
+            - op['krotm'][0, 1] * op['krotm'][1, 0])
+    timeinv = det2 < 0.0
+    if l == 0:
+        return _rloc_spinor_s(ref, op, timeinv), timeinv
     Dref = dmat(l, ref['a'], ref['b'], ref['g'], float(ref['iprop']))
     f = (ref['a'] + ref['g']) / 2.0
     spmt = np.zeros((2, 2), dtype=complex)
@@ -249,10 +307,6 @@ def rotloc_rotl_so(l, ref, ops, iatom, iref):
     rotl[:d, d:] = spmt[0, 1] * Dref
     rotl[d:, :d] = spmt[1, 0] * Dref
 
-    op = next(o for o in ops if o['perm'][iref - 1] == iatom)
-    det2 = (op['krotm'][0, 0] * op['krotm'][1, 1]
-            - op['krotm'][0, 1] * op['krotm'][1, 0])
-    timeinv = det2 < 0.0
     srot_phase = (op['g'] - op['a']) if timeinv else (op['a'] + op['g'])
     rotl_sym = dmat(l, op['a'], op['b'], op['g'], float(op['iprop']))
     if timeinv:
