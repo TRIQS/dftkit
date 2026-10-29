@@ -57,8 +57,8 @@ rot_dens.f / setsym.f / set_rotloc.f for the symmetrization and Rloc rotation.
 import os
 import numpy as np
 
-from ._dmftproj import (build_orbs as _build_orbs, validate_spin_windows, band_index_window, dmat, mixing_rotrep, read_almblm, read_dmftsym,
-                        read_fromfile, read_indmftpr, reptrans,
+from ._dmftproj import (build_orbs as _build_orbs, validate_spin_windows, band_index_window, dmat, mixing_rotrep, paramag_time_op,
+                        read_almblm, read_dmftsym, read_fromfile, read_indmftpr, reptrans,
                         rotloc_orbital, rotloc_rotl_so, select_band_window, select_window, tmat, write_row)
 
 
@@ -388,6 +388,14 @@ def _symmetrize_densmat_nonso(orbs, info, ops, nsym, srot_rotreps, dens_raw):
     return out
 
 
+def _add_timeinv_nonso(blocks, l, transmat):
+    """add_timeinv for a paramagnetic non-SO shell (timeinv.f, nsp=1): the
+    single spin block D becomes (D + U conj(D) U^H)/2, U the time-reversal
+    operator in the shell basis."""
+    U = paramag_time_op(dict(l=l, P=transmat))
+    return [(D + U @ np.conj(D) @ np.conj(U.T)) / 2 for D in blocks]
+
+
 def _rotdens_densmat_nonso(blocks, rotrep_loc):
     """rotdens_mat for the non-SO non-mixing path (rot_dens.f:197-228):
     each (2l+1) spin block is rotated as conj(Rloc^T) D Rloc with the bare
@@ -537,9 +545,12 @@ def write_parproj(case):
                                                  srot_rotreps, dens_raw)
             for o in nonmix_orbs:
                 key = (o['atom'], o['l'])
+                blocks = dens_sym[key]
+                if not ifSP:
+                    blocks = _add_timeinv_nonso(
+                        blocks, o['l'], transmats[(o['l'], o['sort'])])
                 rotrep_loc, _ = rotloc_rotrep[key]
-                densprint[key] = _rotdens_densmat_nonso(
-                    dens_sym[key], rotrep_loc)
+                densprint[key] = _rotdens_densmat_nonso(blocks, rotrep_loc)
 
     mixing_groups = {}
     for o in orbs:
