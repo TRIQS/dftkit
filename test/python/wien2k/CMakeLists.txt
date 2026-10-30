@@ -45,11 +45,8 @@ add_test(NAME Py_wien2k_symqmc_mixing
 set_property(TEST Py_wien2k_symqmc_mixing APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
-# Generator on a non-centrosymmetric spin-orbit cell (tellurium, p shell), the
-# dft_tools #148 regime the centrosymmetric d-shell fixtures never reached. The
-# reference is the dmftproj matrix data (single precision, ~10 kB).
-file(COPY Te.dmftsym Te.indmftpr Te.struct wien2k_symqmc_te.ref.npy
-     DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+# Unitarity on a non-centrosymmetric spin-orbit cell (tellurium, p shell).
+# Native reference comparisons are covered by Py_wien2k_te_python below.
 add_test(NAME Py_wien2k_symqmc_noncentrosym
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_symqmc_noncentrosym.py
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
