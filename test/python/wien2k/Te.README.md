@@ -49,15 +49,48 @@ gzip -9 -n Te.almblmup Te.almblmdn
 
 ## Native references
 
-dmftproj derives the case name from the working directory, so run it in a
-directory named `Te` that holds `Te.struct`, `Te.dmftsym`, `Te.indmftpr` and the
-decompressed `Te.almblmup` and `Te.almblmdn`, with `$WIENROOT/SRC_templates`
-containing `case.cf_p_cubic` from `fortran/dmftproj/SRC_templates`:
+`wien2k_te_python.py` compares the Python generators against native dmftproj
+output. dmftproj derives the case name from the working directory, so each
+reference is produced in a directory named after it:
+
+| reference         | indmftpr          | dmftsym          | almblm         | dmftproj flags | files                                     |
+|-------------------|-------------------|------------------|----------------|----------------|-------------------------------------------|
+| `Te`              | `Te.indmftpr`     | `Te.dmftsym`     | up, dn         | `-sp -so`      | ctqmcout, symqmc, parproj                 |
+| `Te_sp`           | `Te_sp.indmftpr`  | `Te.dmftsym`     | up, dn         | `-sp -so`      | ctqmcout, symqmc, parproj                 |
+| `Te_sp_mag`       | `Te_sp.indmftpr`  | `Te_mag.dmftsym` | up, dn         | `-sp -so`      | ctqmcout, parproj                         |
+| `Te_noso`         | `Te_noso.indmftpr`| `Te.dmftsym`     | up, dn         | `-sp`          | ctqmcout                                  |
+| `Te_noso_paramag` | `Te_noso.indmftpr`| `Te.dmftsym`     | up as `.almblm`| none           | ctqmcout, symqmc, sympar, parproj         |
+
+`Te_mag.dmftsym` is `Te.dmftsym` with the operations reordered (4, 5, 6, 1, 2, 3)
+so that a two-fold axis, magnetic under spin-orbit, maps the representative
+onto each atom. `$WIENROOT/SRC_templates` must hold the full-precision
+`case.cf_p_cubic` from `fortran/dmftproj/SRC_templates`. From
+`test/python/wien2k`, with `DMFTPROJ` the built `fortran/dmftproj/dmftproj`:
 
 ```sh
-/path/to/build/fortran/dmftproj/dmftproj -sp -so
+src=$PWD; out=$(mktemp -d)
+ref() {  # ref <reference> <indmftpr> <dmftsym> <sp|pm> <flags> <files...>
+  name=$1 inp=$2 sym=$3 spin=$4 flags=$5; shift 5
+  mkdir "$out/$name" && cd "$out/$name"
+  cp "$src/$inp.indmftpr" "$name.indmftpr"
+  cp "$src/Te.struct" "$name.struct"
+  cp "$src/$sym.dmftsym" "$name.dmftsym"
+  if [ "$spin" = sp ]; then
+    for s in up dn; do gunzip -c "$src/Te.almblm$s.gz" > "$name.almblm$s"; done
+  else
+    gunzip -c "$src/Te.almblmup.gz" > "$name.almblm"
+  fi
+  "$DMFTPROJ" $flags > run.log
+  for f in "$@"; do gzip -9 -n -c "$name.$f" > "$name.$f.gz"; done
+  cd "$src"
+}
+ref Te              Te      Te     sp "-sp -so" ctqmcout symqmc parproj
+ref Te_sp           Te_sp   Te     sp "-sp -so" ctqmcout symqmc parproj
+ref Te_sp_mag       Te_sp   Te_mag sp "-sp -so" ctqmcout parproj
+ref Te_noso         Te_noso Te     sp "-sp"     ctqmcout
+ref Te_noso_paramag Te_noso Te     pm ""        ctqmcout symqmc sympar parproj
+for f in "$out"/*/*.gz; do cmp "$f" "$(basename "$f")"; done
 ```
 
-Without spin-orbit (indmftpr SO flag 0) run `dmftproj -sp`; for the
-paramagnetic path, use `Te.almblmup` as `Te.almblm` and run `dmftproj` without
-flags, as for the `CaOs2_noso` paramagnetic references.
+The last line checks the regenerated references byte for byte against the
+committed ones.
