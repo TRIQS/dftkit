@@ -25,7 +25,12 @@ add_test(NAME Py_wien2k_soc_convert
 set_property(TEST Py_wien2k_soc_convert APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
-# Pure-Python case.symqmc generator vs the shipped dmftproj Fortran output.
+# Native dmftproj precision, checked against unitarity without golden outputs.
+if(Build_dmftproj_fortran)
+  add_test(NAME Py_wien2k_native_precision
+           COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_native_precision.py $<TARGET_FILE:dmftproj>)
+endif()
+
 # The generator tests read source fixtures and write only to scratch directories.
 add_test(NAME Py_wien2k_symqmc_python
          COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_symqmc_python.py
