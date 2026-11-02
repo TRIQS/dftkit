@@ -32,6 +32,9 @@ dmftproj.
 
 Run as a script (`python -m triqs_dftkit.wien2k.dmftproj -sp -so [-band]`) it
 mimics the Fortran binary: the case name is the working-directory basename.
+`run_dmftproj` infers spin polarization from the presence of
+case.almblm{up,dn} and spin-orbit from case.indmftpr; the command checks that
+-sp and -so agree with these inputs and exits with an error otherwise.
 
 Unsupported inputs raise explicitly: selected irreducible subspaces, cubic f
 harmonics, multiple local orbitals per angular momentum, spin-mixing bases
@@ -44,6 +47,7 @@ import os
 import sys
 
 from . import ctqmcout, outband, oubwin, parproj, symqmc, sympar
+from ._dmftproj import read_indmftpr
 
 
 def run_dmftproj(case, band=False):
@@ -60,16 +64,41 @@ def run_dmftproj(case, band=False):
     oubwin.write_oubwin(case)
 
 
+def check_flags(case, sp, so, band=False):
+    """Raise ValueError unless the dmftproj -sp/-so flags describe the inputs
+    of `case` the way run_dmftproj reads them: -sp <=> case.almblm{up,dn}
+    both present, -so <=> the case.indmftpr spin-orbit flag, -so => -sp."""
+    if so and not sp:
+        raise ValueError('-so requires spin-polarized input files and -sp')
+    spin_files = all(os.path.exists(f'{case}.almblm{s}') for s in ('up', 'dn'))
+    if sp and not spin_files:
+        raise ValueError(f'-sp given but {case}.almblmup / {case}.almblmdn not found')
+    if not sp and spin_files:
+        raise ValueError(f'{case}.almblmup and {case}.almblmdn present without -sp; '
+                         f'pass -sp, or remove them to use {case}.almblm')
+    if band:
+        info = outband._read_indmftpr_band(case + '.indmftpr')[0]
+    else:
+        info = read_indmftpr(case + '.indmftpr')
+    if bool(info['so']) != so:
+        raise ValueError(f'{case}.indmftpr has spin-orbit flag {info["so"]}, '
+                         f'but -so was {"given" if so else "not given"}')
+
+
 def main(argv=None):
-    # The Fortran dmftproj takes the case name from the working directory; -sp
-    # and -so are inferred from the input files, so they are accepted for
-    # compatibility and ignored. -band selects the band-structure output.
+    # Same command line as the Fortran dmftproj: the case name is the working
+    # directory basename, flags are -sp, -so and -band.
     argv = sys.argv[1:] if argv is None else argv
     for flag in argv:
         if flag not in ('-sp', '-so', '-band'):
             raise SystemExit(f'dmftproj: unknown flag {flag}')
     case = os.path.basename(os.getcwd())
-    run_dmftproj(case, band='-band' in argv)
+    band = '-band' in argv
+    try:
+        check_flags(case, '-sp' in argv, '-so' in argv, band=band)
+    except ValueError as error:
+        raise SystemExit(f'dmftproj: {error}')
+    run_dmftproj(case, band=band)
 
 
 if __name__ == '__main__':

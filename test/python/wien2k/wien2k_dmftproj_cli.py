@@ -27,9 +27,19 @@ with tempfile.TemporaryDirectory() as tmp:
         source = here / f'CaOs2_noso.almblm{spin}.gz'
         with gzip.open(source, 'rb') as compressed:
             (case_dir / f'{case}.almblm{spin}').write_bytes(compressed.read())
-    run = subprocess.run([sys.executable, str(wrapper), '-sp'], cwd=case_dir,
-                         env=os.environ, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, text=True)
+    def dmftproj(*flags):
+        return subprocess.run([sys.executable, str(wrapper), *flags], cwd=case_dir,
+                              env=os.environ, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True)
+
+    # Flags that disagree with the inputs (spin files present, indmftpr
+    # without SO) are rejected before any output is written.
+    for flags in ((), ('-so',), ('-sp', '-so')):
+        run = dmftproj(*flags)
+        assert run.returncode != 0 and 'dmftproj:' in run.stdout, (flags, run.stdout)
+    assert not list(case_dir.glob(f'{case}.ctqmcout'))
+
+    run = dmftproj('-sp')
     assert run.returncode == 0, run.stdout
     for suffix in ('ctqmcout', 'symqmc', 'sympar', 'parproj',
                    'oubwinup', 'oubwindn'):
