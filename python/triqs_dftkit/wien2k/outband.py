@@ -54,7 +54,7 @@ from scipy.linalg.blas import zgemm
 from ._dmftproj import (validate_spin_windows, dmat, read_almblm, read_dmftsym, read_fromfile,
                         read_indmftpr, reptrans, rotloc_orbital, select_window, to_float,
                         write_row)
-from .ctqmcout import _build_crorbs, _sqrt_inv
+from .ctqmcout import _build_crorbs, _select_irreps, _sqrt_inv, write_projector_blocks
 from .parproj import (_build_matn_rep, _build_matn_rep_mixing, _build_orbs)
 
 
@@ -154,6 +154,7 @@ def write_outband(case):
                 info['sorts'][o['sort'] - 1]['sourcefile'], o['l'])
         else:
             transmats[key], mixing[key] = reptrans(o['basis'], o['l']), False
+    _select_irreps(crorbs, info, mixing, ifSO)
 
     # rot_projectmat local rotation: the op mapping the sort representative onto
     # this atom (set_projections.f via rot_projectmat). Same as ctqmcout/parproj.
@@ -201,18 +202,14 @@ def write_outband(case):
         incl, nb_bot, nb_top = windows[ik]
         if not incl:
             continue
-        blocks = []
-        layout = []
+        layout = []  # (key, rows): the rows of mat_rep[key] that are orthonormalized
         for icr, cr in enumerate(crorbs):
-            l = cr['l']
-            if mixing[(l, cr['sort'])]:
-                blocks.append(mat_rep[(icr, ik)])
-                layout.append(((icr, ik), 2 * (2 * l + 1)))
+            if mixing[(cr['l'], cr['sort'])]:
+                layout.append(((icr, ik), cr['rows']))
             else:
                 for ispin in range(ns):
-                    blocks.append(mat_rep[(icr, ik, ispin)])
-                    layout.append(((icr, ik, ispin), 2 * l + 1))
-        D = np.vstack(blocks)
+                    layout.append(((icr, ik, ispin), cr['rows']))
+        D = np.vstack([mat_rep[key][rows] for key, rows in layout])
         # match the Fortran's exact BLAS calls (orthogonal_wannier_SO): the
         # near-singular O^{-1/2} amplifies any last-bit difference, so use the
         # identical ZGEMM trans flags rather than numpy's conj-transpose copies.
@@ -220,9 +217,10 @@ def write_outband(case):
         S = _sqrt_inv(O)
         D_orth = zgemm(1.0, S, D)             # ZGEMM('N','N'): O^{-1/2} @ D
         row = 0
-        for key, nrows in layout:
-            mat_rep[key] = D_orth[row:row + nrows, :]
-            row += nrows
+        for key, rows in layout:
+            mat_rep[key] = mat_rep[key].copy()
+            mat_rep[key][rows] = D_orth[row:row + len(rows), :]
+            row += len(rows)
 
     # ---- raw Theta projectors matn_rep per included orbital (parproj path) ----
     matn_reps = {}
@@ -254,22 +252,8 @@ def write_outband(case):
         # correlated projector block: DO ik, DO icrorb (Loewdin orthonormalized).
         for ik in range(nk):
             for icr, cr in enumerate(crorbs):
-                l = cr['l']
-                if mixing[(l, cr['sort'])]:
-                    P = mat_rep[(icr, ik)]
-                    for m in range(2 * (2 * l + 1)):
-                        write_row(f, P[m, :].real)
-                    for m in range(2 * (2 * l + 1)):
-                        write_row(f, P[m, :].imag)
-                    continue
-                for ispin in range(ns):
-                    P = mat_rep[(icr, ik, ispin)]
-                    for mi in range(2 * l + 1):
-                        write_row(f, P[mi, :].real)
-                for ispin in range(ns):
-                    P = mat_rep[(icr, ik, ispin)]
-                    for mi in range(2 * l + 1):
-                        write_row(f, P[mi, :].imag)
+                write_projector_blocks(f, cr, mat_rep, icr, ik, ns,
+                                       mixing[(cr['l'], cr['sort'])])
 
         # H(k) eigenvalues (skip is=2 under SO)
         for ispin in range(ns):

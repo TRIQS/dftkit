@@ -45,6 +45,10 @@ It follows the Fortran path field by field:
   P <- O^{-1/2} P with O = D D^H over all correlated rows
   (orthogonal_wannier_SO, dmftproj.f:847). This step is what the ctqmcout
   numbers carry; it is applied per k over the full ndim x nbands stack.
+- irrep selection (indmftpr irrep count and flag line): without spin-orbit
+  coupling, and for a spin-mixing basis, only the selected irreps of a shell
+  are orthonormalized and written, one correlated-shell entry per irrep; a
+  spin-diagonal basis under spin-orbit coupling keeps the whole shell.
 - the Rloc spinor block rotloc%rotrep (outputqmc.f:303-313), built from the
   symmetry operation mapping the representative atom onto each equivalent one
   (set_rotloc.f / setsym.f).
@@ -61,6 +65,7 @@ from scipy.linalg.lapack import zheev
 from scipy.linalg.blas import zgemm
 
 from ._dmftproj import (build_orbs as _build_orbs, validate_spin_windows, band_index_window, dmat, fmt_scalar, read_almblm,
+                        basis_dreps, block_rows, irrep_blocks,
                         read_dmftsym, read_fromfile, read_indmftpr, reptrans,
                         rotloc_orbital, rotloc_rotl_so, select_band_window, select_window,
                         tmat, write_row)
@@ -98,6 +103,49 @@ def _build_crorbs(info):
                 crorbs.append(dict(atom=atom, sort=isort, l=l,
                                   basis=sortinfo['basis'], first=(imu == 1)))
     return crorbs
+
+
+def _select_irreps(crorbs, info, mixing, ifSO):
+    """Attach the correlated irreps to each crorb: `blocks` (offset, dim,
+    irep) of the written rows, `rows` their indices, `split` whether the
+    shell is written per irep, and `dreps` the irrep dimensions of the
+    basis. A shell without selection is one block over all its rows."""
+    for cr in crorbs:
+        l, sort = cr['l'], cr['sort']
+        sortinfo = info['sorts'][sort - 1]
+        ismix = mixing[(l, sort)]
+        dreps = None
+        if l > 0 and l in sortinfo['correps']:
+            dreps = basis_dreps(cr['basis'], l, sortinfo['sourcefile'])
+        blocks = irrep_blocks(sortinfo, l, ismix, ifSO, dreps)
+        cr['split'] = blocks is not None
+        cr['dreps'] = dreps
+        if blocks is None:
+            blocks = [(0, 2 * (2 * l + 1) if ismix else 2 * l + 1, 1)]
+        cr['blocks'] = blocks
+        cr['rows'] = block_rows(blocks)
+
+
+def write_projector_blocks(f, cr, mat_rep, icr, ik, ns, ismix):
+    """Write the correlated projector of one crorb at one k: per irep block,
+    the real rows then the imaginary rows, each over the spins of a
+    spin-diagonal basis (outputqmc.f, outband.f)."""
+    for off, size, _ in cr['blocks']:
+        if ismix:
+            P = mat_rep[(icr, ik)]
+            for m in range(off, off + size):
+                write_row(f, P[m, :].real)
+            for m in range(off, off + size):
+                write_row(f, P[m, :].imag)
+            continue
+        for ispin in range(ns):
+            P = mat_rep[(icr, ik, ispin)]
+            for m in range(off, off + size):
+                write_row(f, P[m, :].real)
+        for ispin in range(ns):
+            P = mat_rep[(icr, ik, ispin)]
+            for m in range(off, off + size):
+                write_row(f, P[m, :].imag)
 
 
 # --- Rloc spinor representation (set_rotloc.f / setsym.f) ---------------------
@@ -211,6 +259,7 @@ def write_ctqmcout(case):
             transmats[key], mixing[key] = reptrans(cr['basis'], cr['l']), False
     if not ifSO and any(mixing.values()):
         raise NotImplementedError('spin-mixing bases require spin-orbit coupling')
+    _select_irreps(crorbs, info, mixing, ifSO)
 
     # rotloc Euler angles per crorb: the symmetry op mapping the representative
     # atom of the sort onto this atom (set_rotloc.f). With identity struct
@@ -274,21 +323,16 @@ def write_ctqmcout(case):
         incl, nb_bot, nb_top = windows[ik]
         if not incl:
             continue
-        blocks = []
-        layout = []  # (key, nrows)
+        layout = []  # (key, rows): the rows of mat_rep[key] that are orthonormalized
         for icr, cr in enumerate(crorbs):
-            l = cr['l']
-            if ifSO and mixing[(l, cr['sort'])]:
-                blocks.append(mat_rep[(icr, ik)])
-                layout.append(((icr, ik), 2 * (2 * l + 1)))
+            if ifSO and mixing[(cr['l'], cr['sort'])]:
+                layout.append(((icr, ik), cr['rows']))
             elif ifSO:
                 for ispin in range(ns):
-                    blocks.append(mat_rep[(icr, ik, ispin)])
-                    layout.append(((icr, ik, ispin), 2 * l + 1))
+                    layout.append(((icr, ik, ispin), cr['rows']))
             else:
-                blocks.append(mat_rep[(icr, ik, gspin)])
-                layout.append(((icr, ik, gspin), 2 * l + 1))
-        D = np.vstack(blocks)                 # ndim x nbnd
+                layout.append(((icr, ik, gspin), cr['rows']))
+        D = np.vstack([mat_rep[key][rows] for key, rows in layout])  # ndim x nbnd
         # match the Fortran's exact BLAS calls (orthogonal_wannier[_SO]): the
         # near-singular O^{-1/2} amplifies any last-bit difference, so use the
         # identical ZGEMM trans flags rather than numpy's conj-transpose copies.
@@ -296,9 +340,10 @@ def write_ctqmcout(case):
         S = _sqrt_inv(O)
         D_orth = zgemm(1.0, S, D)             # ZGEMM('N','N'): O^{-1/2} @ D
         row = 0
-        for key, nrows in layout:
-            mat_rep[key] = D_orth[row:row + nrows, :]
-            row += nrows
+        for key, rows in layout:
+            mat_rep[key] = mat_rep[key].copy()
+            mat_rep[key][rows] = D_orth[row:row + len(rows), :]
+            row += len(rows)
 
     # ---- Rloc rotrep per crorb ----
     rloc_blocks = []
@@ -330,23 +375,32 @@ def write_ctqmcout(case):
         f.write('%6d\n' % ncrorb)
         for cr in crorbs:
             l = cr['l']
-            size = 2 * (2 * l + 1) if ifSO else 2 * l + 1
-            f.write('%6d %6d %6d %6d %6d %6d \n' %
-                    (cr['atom'], cr['sort'], l, size, 1 if ifSO else 0, 1))
+            if cr['split']:
+                sizes = [(size, irep) for _, size, irep in cr['blocks']]
+            else:
+                sizes = [(2 * (2 * l + 1) if ifSO else 2 * l + 1, 1)]
+            for size, irep in sizes:
+                f.write('%6d %6d %6d %6d %6d %6d \n' %
+                        (cr['atom'], cr['sort'], l, size, 1 if ifSO else 0, irep))
 
         # Rloc block per crorb. SO writes the 2*(2l+1) spinor whole shell;
-        # non-SO the bare (2l+1) shell. The time-reversal flag follows under
+        # non-SO the bare (2l+1) shell; a split shell the diagonal block of
+        # each correlated irrep. The time-reversal flag follows under
         # SO always, under non-SO only when ifSP (outputqmc.f:347-351).
-        for rotrep, timeinv in rloc_blocks:
-            for m in range(rotrep.shape[0]):
-                write_row(f, rotrep[m, :].real)
-            for m in range(rotrep.shape[0]):
-                write_row(f, rotrep[m, :].imag)
+        for cr, (rotrep, timeinv) in zip(crorbs, rloc_blocks):
+            blocks = cr['blocks'] if cr['split'] else [(0, rotrep.shape[0], 1)]
+            for off, size, _ in blocks:
+                sub = rotrep[off:off + size, off:off + size]
+                for m in range(size):
+                    write_row(f, sub[m, :].real)
+                for m in range(size):
+                    write_row(f, sub[m, :].imag)
             if ifSO or ifSP:
                 f.write('%6d\n' % (1 if timeinv else 0))
 
         # complex-harmonics -> basis transform block (crorb%first only). Mixing
         # writes the full 2(2l+1) transmat; non-mixing the spin block-diagonal.
+        # A split shell heads it with the number and dimensions of all irreps.
         for cr in crorbs:
             if not cr['first']:
                 continue
@@ -362,7 +416,11 @@ def write_ctqmcout(case):
             else:
                 spinrot = transmat       # bare (2l+1) transform, non-SO
             dim = spinrot.shape[0]
-            f.write('%6d %6d \n' % (1, dim))
+            if cr['split']:
+                dreps = cr['dreps']
+                f.write(''.join('%6d ' % x for x in [len(dreps)] + dreps) + '\n')
+            else:
+                f.write('%6d %6d \n' % (1, dim))
             for m in range(dim):
                 write_row(f, spinrot[m, :].real)
             for m in range(dim):
@@ -376,26 +434,11 @@ def write_ctqmcout(case):
                 incl, nb_bot, nb_top = windows[ik]
                 f.write('%6d\n' % abs(nb_top - nb_bot + 1))
 
-        # projector block: DO ik, DO icrorb. Mixing writes the full 2(2l+1)
-        # block from is=1; non-mixing the two (2l+1) spin blocks.
+        # projector block: DO ik, DO icrorb, DO correlated irrep.
         for ik in range(nk):
             for icr, cr in enumerate(crorbs):
-                l = cr['l']
-                if mixing[(l, cr['sort'])]:
-                    P = mat_rep[(icr, ik)]
-                    for m in range(2 * (2 * l + 1)):
-                        write_row(f, P[m, :].real)
-                    for m in range(2 * (2 * l + 1)):
-                        write_row(f, P[m, :].imag)
-                    continue
-                for ispin in range(ns):
-                    P = mat_rep[(icr, ik, ispin)]
-                    for mi in range(2 * l + 1):
-                        write_row(f, P[mi, :].real)
-                for ispin in range(ns):
-                    P = mat_rep[(icr, ik, ispin)]
-                    for mi in range(2 * l + 1):
-                        write_row(f, P[mi, :].imag)
+                write_projector_blocks(f, cr, mat_rep, icr, ik, ns,
+                                       mixing[(cr['l'], cr['sort'])])
 
         # k-weights
         for ik in range(nk):

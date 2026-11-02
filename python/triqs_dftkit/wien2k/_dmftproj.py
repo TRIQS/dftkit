@@ -413,6 +413,80 @@ def build_orbs(info):
     return orbs
 
 
+# --- irreducible representations -------------------------------------------
+
+_CUBIC_DREPS = {1: [3], 2: [2, 3]}
+
+
+def _read_correps(line, nreps):
+    """The correlated-irrep flags of one indmftpr line, read like Fortran
+    '(14i1)': one digit per column, a blank column reads as 0."""
+    cols = line.ljust(nreps)[:nreps]
+    if any(c not in ' 0123456789' for c in cols):
+        raise ValueError(f'irrep selection line {line!r} must hold {nreps} single-digit flags')
+    return [int(c) if c != ' ' else 0 for c in cols]
+
+
+def basis_dreps(basis, l, sourcefile=None):
+    """Dimensions of the irreducible representations of the basis of shell l,
+    in basis-row order (set_ang_trans.f). A row starting with '*' closes an
+    irrep. A fromfile basis that keeps spin diagonal counts its up rows only;
+    a spin-mixing one counts all 2(2l+1) rows."""
+    if basis == 'complex':
+        return [2 * l + 1]
+    if basis == 'cubic':
+        return list(_CUBIC_DREPS[l])
+    n = 2 * (2 * l + 1)
+    marks = []
+    for line in open(sourcefile):
+        if not line.strip():
+            continue
+        marks.append(line[:1] == '*')
+        if len(marks) == n:
+            break
+    dreps, start = [], 0
+    for m, mark in enumerate(marks):
+        if mark:
+            dreps.append(m - start + 1)
+            start = m + 1
+    _, mixing = read_fromfile(sourcefile, l)
+    if not mixing:
+        dreps = dreps[:len(dreps) // 2]
+    if sum(dreps) != (n if mixing else 2 * l + 1):
+        raise ValueError(f'{sourcefile}: the irrep markers of l={l} do not cover the basis')
+    return dreps
+
+
+def irrep_blocks(sortinfo, l, mixing, ifSO, dreps):
+    """Row blocks (offset, dim, irep) of the correlated irreps of shell l, in
+    the basis transform's row order, or None when the whole shell is
+    correlated. Under spin-orbit coupling with a spin-diagonal basis the
+    whole shell is used whatever the selection (dmftproj.f)."""
+    correps = sortinfo['correps'].get(l)
+    if correps is None or l == 0:
+        return None
+    if len(correps) > (2 * (2 * l + 1) if ifSO else 2 * l + 1):
+        raise ValueError(f'{len(correps)} irreps are not possible for l={l}')
+    if ifSO and not mixing:
+        return None
+    if len(correps) != len(dreps):
+        raise ValueError(f'the indmftpr gives {len(correps)} irreps for l={l}, '
+                         f'the basis has {len(dreps)}')
+    blocks, off = [], 0
+    for irep, (flag, d) in enumerate(zip(correps, dreps), start=1):
+        if flag == 1:
+            blocks.append((off, d, irep))
+        off += d
+    if not blocks:
+        raise ValueError(f'no irrep of l={l} is selected as correlated')
+    return blocks
+
+
+def block_rows(blocks):
+    """Row indices of the selected irrep blocks, in order."""
+    return np.concatenate([np.arange(off, off + d) for off, d, _ in blocks])
+
+
 # --- case.indmftpr -----------------------------------------------------------
 
 def read_indmftpr(indmftpr, *, lines=None):
@@ -421,14 +495,16 @@ def read_indmftpr(indmftpr, *, lines=None):
     Returns a dict with nsort, mult, lmax, the spin-orbit flag `so`, the energy
     window (e_bot, e_top, proj_mode) and one `sorts` entry per atomic sort with
     its basis name, optional fromfile sourcefile path, and the correlated /
-    included l lists (l_inc==2 / l_inc in {1,2}). Every generator derives its
+    included l lists (l_inc==2 / l_inc in {1,2}) and `correps`, the
+    correlated-irrep flags per correlated l that has an irrep selection
+    line. Every generator derives its
     shell or orbital list from this one parse. Optional lines replace the file
     contents; relative basis paths still resolve beside indmftpr."""
     if lines is None:
         with open(indmftpr) as fh:
             lines = fh.readlines()
-    raw = [l.split('!')[0].strip() for l in lines]
-    raw = [l for l in raw if l != '']
+    kept = [l.rstrip('\n') for l in lines if l.split('!')[0].strip() != '']
+    raw = [l.split('!')[0].strip() for l in kept]
     nsort = int(raw[0].split()[0])
     mult = [int(x) for x in raw[1].split()][:nsort]
     lmax = int(raw[2].split()[0])
@@ -448,12 +524,10 @@ def read_indmftpr(indmftpr, *, lines=None):
         i += 1
         correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
         included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
+        correps = {}
         for l in correlated_ls:
-            if ireps[l] > 1:
-                raise NotImplementedError('selection of individual irreducible representations is not implemented')
             if ireps[l] > 0:
-                if raw[i].strip() != '1':
-                    raise NotImplementedError('selection of individual irreducible representations is not implemented')
+                correps[l] = _read_correps(kept[i], ireps[l])
                 i += 1                   # each correlated l has its own correps line
         if correlated_ls:
             sort_so = int(raw[i].split()[0])
@@ -464,7 +538,8 @@ def read_indmftpr(indmftpr, *, lines=None):
             so = sort_so                 # SO flag follows a correlated sort
             i += 1
         sorts.append(dict(basis=basis, sourcefile=sourcefile,
-                          correlated_ls=correlated_ls, included_ls=included_ls))
+                          correlated_ls=correlated_ls, included_ls=included_ls,
+                          correps=correps))
     last = raw[-1].split()
     e_bot, e_top = to_float(last[0]), to_float(last[1])
     proj_mode = int(last[2]) if len(last) >= 3 else 0
