@@ -94,3 +94,33 @@ for f in "$out"/*/*.gz; do cmp "$f" "$(basename "$f")"; done
 
 The last line checks the regenerated references byte for byte against the
 committed ones.
+
+## Full-BZ fixture for the frame convention
+
+`Te_fbz.ctqmcout.gz` and `Te_fbz.oubwinup.gz` feed `wien2k_frames_te.py`. They
+are native dmftproj output for the same structure, `Te.indmftpr` and
+`Te.dmftsym`, but on a full-BZ k-mesh, so that the k-summed local Hamiltonian
+is symmetric by itself. The matching `case.symqmc` is byte-identical to
+`Te.symqmc.gz` and is shared.
+
+- Wien2k 24.1 (gfortran build), serial, no MPI.
+- Density: the converged density of the full-mesh run mentioned above.
+- Mesh: `x kgen -fbz` with divisions 3 3 2, unshifted: 18 k-points with equal
+  weights.
+- `Te.in1c` from that run, with the RKmax entry written as `7.00`. A decimal
+  comma (`7,00`) is read correctly by lapw1, but lapw2 of Wien2k 24.1 then
+  reads lmax = 0 and silently writes NaN into `case.almblm*`.
+- `Te.in2c` with `TETRA` and `EMIN = -12.0`, `Te.inso` with Emax 1.9 Ry; the
+  Fermi level is 0.2486 Ry.
+
+Commands, in a case directory named `Te`, then the native dmftproj with the
+full-precision `case.cf_p_cubic` as for the references above:
+
+```sh
+printf '0\n3 3 2\n0\n' | x kgen -fbz
+x lapw1 -up -c; x lapw1 -dn -c; x lapwso -up
+x lapw2 -up -c -so -almd; x lapw2 -dn -c -so -almd
+"$DMFTPROJ" -sp -so
+gzip -9 -n -c Te.ctqmcout > Te_fbz.ctqmcout.gz
+gzip -9 -n -c Te.oubwinup > Te_fbz.oubwinup.gz
+```
