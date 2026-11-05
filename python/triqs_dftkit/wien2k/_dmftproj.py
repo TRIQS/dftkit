@@ -113,6 +113,16 @@ _CUBIC = {
         [0, 2 ** -0.5, 0, -(2 ** -0.5), 0],
         [0, 2 ** -0.5, 0, 2 ** -0.5, 0],
     ], dtype=complex),
+    # Wien2k's cubic option uses the mm2 f basis in case.cf_f_mm2.
+    3: np.array([
+        [0, 0, 0, 1, 0, 0, 0],
+        [0, 2 ** -0.5, 0, 0, 0, 2 ** -0.5, 0],
+        [0, -1j * 2 ** -0.5, 0, 0, 0, 1j * 2 ** -0.5, 0],
+        [-1j * 2 ** -0.5, 0, 0, 0, 0, 0, -1j * 2 ** -0.5],
+        [0, 0, -1j * 2 ** -0.5, 0, -1j * 2 ** -0.5, 0, 0],
+        [2 ** -0.5, 0, 0, 0, 0, 0, -2 ** -0.5],
+        [0, 0, 2 ** -0.5, 0, -2 ** -0.5, 0, 0],
+    ], dtype=complex),
 }
 
 
@@ -122,7 +132,7 @@ def reptrans(basis, l):
     if basis == 'cubic' and l in _CUBIC:
         return _CUBIC[l]
     if basis == 'cubic' and l != 0:
-        raise NotImplementedError('cubic f harmonics are not implemented yet')
+        raise NotImplementedError(f'cubic harmonics for l={l} are not implemented')
     return _COMPLEX[l]
 
 
@@ -415,7 +425,7 @@ def build_orbs(info):
 
 # --- irreducible representations -------------------------------------------
 
-_CUBIC_DREPS = {1: [3], 2: [2, 3]}
+_CUBIC_DREPS = {1: [3], 2: [2, 3], 3: [2, 1, 2, 2]}
 
 
 def _read_correps(line, nreps):
