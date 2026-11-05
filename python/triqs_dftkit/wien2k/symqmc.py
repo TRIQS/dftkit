@@ -48,8 +48,8 @@ through single-precision CMPLX differs from this output at about 1e-7.
 
 import os
 
-from ._dmftproj import (paramag_time_op, read_dmftsym, read_fromfile, read_indmftpr,
-                        reptrans, shell_matrix)
+from ._dmftproj import (basis_dreps, irrep_blocks, paramag_time_op, read_dmftsym,
+                        read_fromfile, read_indmftpr, reptrans, shell_matrix)
 
 _shell_matrix = shell_matrix
 
@@ -58,9 +58,10 @@ _shell_matrix = shell_matrix
 
 def _correlated_shells(info):
     """One entry per correlated atom (l_inc==2), in sort order. Each shell
-    carries l, basis name, its transform matrix P = <new|m> and a mixing flag
-    (True for a spin-coupling fromfile basis). symqmc builds its symmetry
-    matrices from the exact cubic harmonics."""
+    carries l, basis name, its transform matrix P = <new|m>, a mixing flag
+    (True for a spin-coupling fromfile basis) and `blocks`, the (offset, dim,
+    irep) row blocks of its correlated irreps or None for the whole shell.
+    symqmc builds its symmetry matrices from the exact cubic harmonics."""
     shells = []
     for isort in range(info['nsort']):
         s = info['sorts'][isort]
@@ -70,8 +71,13 @@ def _correlated_shells(info):
                 P, mixing = read_fromfile(s['sourcefile'], l)
             else:
                 P, mixing = reptrans(basis, l), False
+            dreps = None
+            if l > 0 and l in s['correps']:
+                dreps = basis_dreps(basis, l, s['sourcefile'])
+            blocks = irrep_blocks(s, l, mixing, bool(info['so']), dreps)
             for _ in range(info['mult'][isort]):
-                shells.append(dict(l=l, basis=basis, P=P, mixing=mixing))
+                shells.append(dict(l=l, basis=basis, P=P, mixing=mixing,
+                                   blocks=blocks))
     return shells
 
 
@@ -115,10 +121,19 @@ def write_symqmc(case):
             f.write(''.join('%6d ' % t for t in timeinv) + '\n')
         for isym, op in enumerate(ops):
             for sh in shells:
-                f.write(_format_matrix(_shell_matrix(op, sh, timeinv[isym], ifSO)))
+                f.write(_format_blocks(_shell_matrix(op, sh, timeinv[isym], ifSO), sh))
         if not ifSP:
             for sh in shells:
-                f.write(_format_matrix(paramag_time_op(sh)))
+                f.write(_format_blocks(paramag_time_op(sh), sh))
+
+
+def _format_blocks(mat, shell):
+    """The whole matrix, or for a split shell the diagonal block of each
+    correlated irrep in turn."""
+    if shell.get('blocks') is None:
+        return _format_matrix(mat)
+    return ''.join(_format_matrix(mat[off:off + d, off:off + d])
+                   for off, d, _ in shell['blocks'])
 
 
 def _format_matrix(mat):

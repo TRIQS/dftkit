@@ -167,16 +167,14 @@ with tempfile.TemporaryDirectory() as tmp:
     parsed = dp.read_indmftpr(path)
     assert parsed['so'] == 1 and parsed['sorts'][0]['correlated_ls'] == [1, 2]
 
-    # Selecting individual irreps is not implemented: do not silently export
-    # the entire shell in place of the requested correlated subspace.
+    # The irrep selection is read column by column like Fortran '(14i1)':
+    # a blank column selects nothing.
     with open(path, 'w') as fh:
         fh.write('1\n1\n2\ncubic\n0 0 2\n0 0 2\n10\n1\n-2 3\n')
-    try:
-        dp.read_indmftpr(path)
-    except NotImplementedError as error:
-        assert 'irreducible' in str(error)
-    else:
-        raise AssertionError('split correlated shell was silently accepted')
+    assert dp.read_indmftpr(path)['sorts'][0]['correps'] == {2: [1, 0]}
+    with open(path, 'w') as fh:
+        fh.write('1\n1\n2\ncubic\n0 0 2\n0 0 2\n 1\n1\n-2 3\n')
+    assert dp.read_indmftpr(path)['sorts'][0]['correps'] == {2: [0, 1]}
 
     # The input lacks the cross overlaps needed for two local orbitals;
     # the native implementation rejects this case as well.

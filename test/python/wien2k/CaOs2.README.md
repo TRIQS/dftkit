@@ -107,3 +107,63 @@ double-precision coefficients. The eight-digit template can leave differences
 of about `7e-9`, exceeding the generator tests' absolute tolerance of `1e-11`.
 This requirement applies to the full-rank generator references; retain the
 original template when reproducing the historical converter fixture above.
+
+## Irrep selection references
+
+`wien2k_irrep_python.py` compares the Python generators against native
+dmftproj output for indmftpr files that select individual irreducible
+representations of the Os d shell. The cubic basis has the irreps eg (2) and
+t2g (3); `jbasis_d.dat` has j=3/2 (4) and j=5/2 (6). Under spin-orbit coupling
+with a spin-diagonal basis dmftproj keeps the whole shell (`CaOs2_irrep_so`).
+
+| reference                 | indmftpr                  | almblm              | dmftproj flags   | files            |
+|---------------------------|---------------------------|---------------------|------------------|------------------|
+| `CaOs2_irrep_t2g`         | `CaOs2_irrep_t2g`         | `CaOs2_noso` up, dn | `-sp`            | ctqmcout, symqmc |
+| `CaOs2_irrep_eg`          | `CaOs2_irrep_eg`          | `CaOs2_noso` up, dn | `-sp`            | ctqmcout, symqmc |
+| `CaOs2_irrep_t2g_paramag` | `CaOs2_irrep_t2g`         | `CaOs2_noso` up as `.almblm` | none    | ctqmcout, symqmc |
+| `CaOs2_irrep_so`          | `CaOs2_irrep_so`          | `CaOs2` up, dn      | `-sp -so`        | ctqmcout, symqmc |
+| `CaOs2_irrep_j52`         | `CaOs2_irrep_j52`         | `CaOs2` up, dn      | `-sp -so`        | ctqmcout, symqmc |
+| `CaOs2_band_j52`          | `CaOs2_band_j52`          | `CaOs2_band` up, dn | `-sp -so -band`  | outband          |
+
+dmftproj derives the case name from the working directory and truncates that
+path at 120 characters, so use a short output directory. From
+`test/python/wien2k`, with `DMFTPROJ` the built `fortran/dmftproj/dmftproj`:
+
+```sh
+src=$PWD; out=$(mktemp -d)
+mkdir -p "$out/wienroot/SRC_templates"
+sed 's/\.70710678/.70710678118654752440/g' case.cf_d_eg_t2g \
+  > "$out/wienroot/SRC_templates/case.cf_d_eg_t2g"
+export WIENROOT="$out/wienroot"
+ref() {  # ref <reference> <indmftpr> <almblm> <sp|pm> <flags> <files...>
+  name=$1 inp=$2 alm=$3 spin=$4 flags=$5; shift 5
+  mkdir "$out/$name" && cd "$out/$name"
+  cp "$src/$inp.indmftpr" "$name.indmftpr"
+  cp "$src/CaOs2.struct" "$name.struct"
+  cp "$src/CaOs2.dmftsym" "$name.dmftsym"
+  cp "$src/jbasis_d.dat" "$src/CaOs2_band.klist_band" .
+  mv CaOs2_band.klist_band "$name.klist_band"
+  if [ "$spin" = sp ]; then
+    for s in up dn; do gunzip -c "$src/$alm.almblm$s.gz" > "$name.almblm$s"; done
+  else
+    gunzip -c "$src/$alm.almblmup.gz" > "$name.almblm"
+  fi
+  "$DMFTPROJ" $flags > run.log
+  for f in "$@"; do gzip -9 -n -c "$name.$f" > "$name.$f.gz"; done
+  cd "$src"
+}
+ref CaOs2_irrep_t2g         CaOs2_irrep_t2g  CaOs2_noso sp "-sp"           ctqmcout symqmc
+ref CaOs2_irrep_eg          CaOs2_irrep_eg   CaOs2_noso sp "-sp"           ctqmcout symqmc
+ref CaOs2_irrep_t2g_paramag CaOs2_irrep_t2g  CaOs2_noso pm ""              ctqmcout symqmc
+ref CaOs2_irrep_so          CaOs2_irrep_so   CaOs2      sp "-sp -so"       ctqmcout symqmc
+ref CaOs2_irrep_j52         CaOs2_irrep_j52  CaOs2      sp "-sp -so"       ctqmcout symqmc
+ref CaOs2_band_j52          CaOs2_band_j52   CaOs2_band sp "-sp -so -band" outband
+for f in "$out"/*/*.gz; do cmp "$f" "$(basename "$f")"; done
+```
+
+The last line checks the regenerated references byte for byte against the
+committed ones. Selecting more than one irrep of a shell (e.g. `11` for eg
+and t2g) makes native dmftproj write one correlated-shell entry per irrep
+under a shell count per atom, which the Wien2k converter cannot read; the
+Python generators refuse it. To correlate the whole shell, set its irrep
+count to 0.
