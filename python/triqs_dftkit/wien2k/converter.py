@@ -814,6 +814,10 @@ class Converter(ConverterTools):
         """
         Reads and stores symmetrisation data from symm_file, which can be is case.sympar or case.symqmc.
 
+        The matrices are stored as written by dmftproj, in the global frame, the
+        frame of ``proj_mat``. They act on global-frame quantities; ``rot_mat``
+        maps to the local frames afterwards, as in ``SumkDFT``.
+
         Parameters
         ----------
         orbits : list of dicts

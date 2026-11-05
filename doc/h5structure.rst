@@ -246,9 +246,12 @@ These are written by **all** converters and are what
    * - ``rot_mat``
      - list of numpy.array.complex, dim ``n_corr_shells`` x
        [``corr_shells['dim']``, ``corr_shells['dim']``]
-     - Rotation matrices for correlated shells, if ``use_rotations``. These
-       rotations are automatically applied for up / downfolding. Set to the
-       unity matrix if no rotations are used.
+     - Rotation matrices for correlated shells, if ``use_rotations``, from the
+       global to the local frame of each shell: a global-frame matrix ``M``
+       becomes ``rot_mat^dag M rot_mat`` (complex conjugated as well if
+       ``rot_mat_time_inv`` and ``SO`` are 1). ``proj_mat`` is in the global
+       frame. These rotations are automatically applied for up / downfolding.
+       Set to the unity matrix if no rotations are used.
    * - ``rot_mat_time_inv``
      - list of int, dim ``n_corr_shells``
      - If ``SP`` is 1, 1 if the coordinate transformation contains inversion, 0
@@ -497,7 +500,7 @@ groups have identical structure, they only differ in what ``orbits`` runs over.
      - list of list of numpy.array.complex, dim ``n_symm`` x ``n_orbits`` x
        [``orbits['dim']``, ``orbits['dim']``]
      - Representation of each symmetry operation in the orbital basis of each
-       shell.
+       shell, in the global frame (see the frame note below).
    * - ``mat_tinv``
      - list of numpy.array.complex, dim ``n_orbits`` x [``orbits['dim']``,
        ``orbits['dim']``]
@@ -509,6 +512,17 @@ groups have identical structure, they only differ in what ``orbits`` runs over.
    * - ``SO``
      - int
      - Spin-orbit flag, mirroring ``dft_input/SO``.
+
+.. note::
+
+   **Frame convention.** ``mat`` acts on global-frame quantities, the same
+   frame as ``proj_mat``. ``SumkDFT`` therefore symmetrizes the local Green's
+   function, the density matrix and the local levels in the global frame and
+   only then rotates them to the local frame with ``rot_mat``. Applying ``mat``
+   to local-frame data, or rotating ``mat`` into the local frames and applying
+   it to global-frame data, is wrong whenever equivalent atoms have different
+   local frames. The test ``wien2k_frames_te.py`` checks this on full-BZ
+   tellurium.
 
 .. note::
 

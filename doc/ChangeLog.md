@@ -17,6 +17,7 @@ this section to the version number when the next release is cut.
 * Read the high-symmetry k-path labels from the end of `case.outband` and store them as `kpts_labels` / `kpts_labels_idx` in `dft_bands_input`, matching the VASP band conversion
 
 ### test
+* Check the Wien2k frame convention on full-BZ tellurium with spin-orbit coupling: the symmetry matrices from `case.symqmc` leave the global-frame local Hamiltonian invariant, as `SumkDFT` uses them, and applying them in the local frames is detected. Document the convention for `rot_mat` and the symmetry matrices in the HDF5 reference
 * Check that the Wannier and Bloch basis conversions of the same wannier90 run describe the same operator, by downfolding the Bloch Hamiltonian with the projectors and comparing with the Wannier one, `P(k) H(k) P(k)^dag = H_W(k)`. `h5diff` only compares each archive with its own frozen reference and cannot catch an error present in both modes
 
 ## Version 4.0.0

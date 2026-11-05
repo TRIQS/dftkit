@@ -70,6 +70,15 @@ add_test(NAME Py_wien2k_irrep_python
 set_property(TEST Py_wien2k_irrep_python APPEND PROPERTY ENVIRONMENT
              PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
 
+# Frame convention on full-BZ tellurium: the converter's global-frame symmetry
+# matrices leave the global-frame local Hamiltonian invariant (SumkDFT order),
+# and applying them to local-frame data is detected. Reads from the source dir.
+add_test(NAME Py_wien2k_frames_te
+         COMMAND ${TRIQS_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/wien2k_frames_te.py
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_property(TEST Py_wien2k_frames_te APPEND PROPERTY ENVIRONMENT
+             PYTHONPATH=${PROJECT_BINARY_DIR}/python:$ENV{PYTHONPATH} ${SANITIZER_RT_PRELOAD})
+
 # Pure-Python case.oubwin band-window generator vs the dmftproj Fortran output.
 # Reads the existing compressed almblm inputs from the source fixtures and
 # compares both spin outputs against CaOs2.oubwinup in a scratch directory.
