@@ -224,3 +224,29 @@ references. To check this equivalence with the native producer, append `1`
 to the window line of each band `indmftpr`, or replace that line with
 `43 92 2`, keeping the final Fermi-energy record unchanged, and use the
 full-precision template recipe above.
+
+## Independent spin windows
+
+`CaOs2_spin_window_top` and `CaOs2_spin_window_bottom` reuse the published
+`CaOs2_noso` up/down coefficients and the included-shell configuration of
+`CaOs2_noso_partial`. Their native `ctqmcout`, `parproj` and `oubwin{up,dn}`
+references test different absolute band indices in the two spin channels.
+The top-boundary case uses -2.0 to 0.723095412425934 Ry and selects 21 and
+20 bands. The bottom-boundary case uses -2.855234706795601 to 3.0 Ry and
+also changes the number of bands below the window between spins. Both
+bounds lie between retained up/down eigenvalues; no coefficients or
+k-points were added.
+
+Regenerate with the `ref` function and full-precision cubic-d template above:
+
+```sh
+ref CaOs2_spin_window_top    CaOs2_spin_window_top    CaOs2_noso sp "-sp" ctqmcout parproj oubwinup oubwindn
+ref CaOs2_spin_window_bottom CaOs2_spin_window_bottom CaOs2_noso sp "-sp" ctqmcout parproj oubwinup oubwindn
+```
+
+Keep `ctqmcout` and `parproj` compressed and `oubwin{up,dn}` as text, as
+for the existing fixtures. `wien2k_noso_python.py` compares all their
+values at absolute tolerance `1e-11`, converts the ordinary and partial
+projectors to HDF5, and independently checks per-spin orthonormality,
+Hermitian below-window density matrices and the total charge below the
+window. Spin-orbit coupling still requires matching up/down windows.
