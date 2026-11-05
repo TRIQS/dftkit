@@ -120,7 +120,6 @@ with a spin-diagonal basis dmftproj keeps the whole shell (`CaOs2_irrep_so`).
 |---------------------------|---------------------------|---------------------|------------------|------------------|
 | `CaOs2_irrep_t2g`         | `CaOs2_irrep_t2g`         | `CaOs2_noso` up, dn | `-sp`            | ctqmcout, symqmc |
 | `CaOs2_irrep_eg`          | `CaOs2_irrep_eg`          | `CaOs2_noso` up, dn | `-sp`            | ctqmcout, symqmc |
-| `CaOs2_irrep_both`        | `CaOs2_irrep_both`        | `CaOs2_noso` up, dn | `-sp`            | ctqmcout, symqmc |
 | `CaOs2_irrep_t2g_paramag` | `CaOs2_irrep_t2g`         | `CaOs2_noso` up as `.almblm` | none    | ctqmcout, symqmc |
 | `CaOs2_irrep_so`          | `CaOs2_irrep_so`          | `CaOs2` up, dn      | `-sp -so`        | ctqmcout, symqmc |
 | `CaOs2_irrep_j52`         | `CaOs2_irrep_j52`         | `CaOs2` up, dn      | `-sp -so`        | ctqmcout, symqmc |
@@ -155,7 +154,6 @@ ref() {  # ref <reference> <indmftpr> <almblm> <sp|pm> <flags> <files...>
 }
 ref CaOs2_irrep_t2g         CaOs2_irrep_t2g  CaOs2_noso sp "-sp"           ctqmcout symqmc
 ref CaOs2_irrep_eg          CaOs2_irrep_eg   CaOs2_noso sp "-sp"           ctqmcout symqmc
-ref CaOs2_irrep_both        CaOs2_irrep_both CaOs2_noso sp "-sp"           ctqmcout symqmc
 ref CaOs2_irrep_t2g_paramag CaOs2_irrep_t2g  CaOs2_noso pm ""              ctqmcout symqmc
 ref CaOs2_irrep_so          CaOs2_irrep_so   CaOs2      sp "-sp -so"       ctqmcout symqmc
 ref CaOs2_irrep_j52         CaOs2_irrep_j52  CaOs2      sp "-sp -so"       ctqmcout symqmc
@@ -164,7 +162,8 @@ for f in "$out"/*/*.gz; do cmp "$f" "$(basename "$f")"; done
 ```
 
 The last line checks the regenerated references byte for byte against the
-committed ones. Selecting more than one irrep of a shell (`CaOs2_irrep_both`)
-writes one correlated-shell entry per irrep, as native dmftproj does; the
-Wien2k converter reads one entry per correlated shell, so such a file is a
-generator reference only.
+committed ones. Selecting more than one irrep of a shell (e.g. `11` for eg
+and t2g) makes native dmftproj write one correlated-shell entry per irrep
+under a shell count per atom, which the Wien2k converter cannot read; the
+Python generators refuse it. To correlate the whole shell, set its irrep
+count to 0.

@@ -479,6 +479,10 @@ def irrep_blocks(sortinfo, l, mixing, ifSO, dreps):
         off += d
     if not blocks:
         raise ValueError(f'no irrep of l={l} is selected as correlated')
+    if len(blocks) > 1:
+        raise ValueError(f'{len(blocks)} irreps of l={l} are selected as correlated; the Wien2k '
+                         f'converter takes one irrep per shell. Select one, or set the irrep '
+                         f'count of l={l} to 0 to correlate the whole shell')
     return blocks
 
 
@@ -503,8 +507,9 @@ def read_indmftpr(indmftpr, *, lines=None):
     if lines is None:
         with open(indmftpr) as fh:
             lines = fh.readlines()
-    kept = [l.rstrip('\n') for l in lines if l.split('!')[0].strip() != '']
-    raw = [l.split('!')[0].strip() for l in kept]
+    phys = [l.rstrip('\n') for l in lines]
+    rec = [n for n, l in enumerate(phys) if l.split('!')[0].strip() != '']
+    raw = [phys[n].split('!')[0].strip() for n in rec]
     nsort = int(raw[0].split()[0])
     mult = [int(x) for x in raw[1].split()][:nsort]
     lmax = int(raw[2].split()[0])
@@ -525,10 +530,14 @@ def read_indmftpr(indmftpr, *, lines=None):
         correlated_ls = [l for l in range(len(l_inc)) if l_inc[l] == 2]
         included_ls = [l for l in range(len(l_inc)) if l_inc[l] in (1, 2)]
         correps = {}
+        last = rec[i - 1]                # last physical line consumed
         for l in correlated_ls:
             if ireps[l] > 0:
-                correps[l] = _read_correps(kept[i], ireps[l])
-                i += 1                   # each correlated l has its own correps line
+                # formatted read: the next physical line, a blank one reads as zeros
+                last += 1
+                correps[l] = _read_correps(phys[last] if last < len(phys) else '', ireps[l])
+        while i < len(rec) and rec[i] <= last:
+            i += 1
         if correlated_ls:
             sort_so = int(raw[i].split()[0])
             if sort_so not in (0, 1):

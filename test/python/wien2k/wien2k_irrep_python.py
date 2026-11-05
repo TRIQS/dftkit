@@ -11,10 +11,10 @@
 #
 #   CaOs2_irrep_t2g          t2g, no SO, spin-polarized
 #   CaOs2_irrep_eg           eg, no SO, spin-polarized
-#   CaOs2_irrep_both         eg and t2g, no SO, spin-polarized
 #   CaOs2_irrep_t2g_paramag  t2g, no SO, paramagnetic
 #   CaOs2_irrep_so           t2g selected under SO in the cubic basis: the
-#                            whole shell is kept
+#                            whole shell is kept, also for a blank selection
+#                            line, which the Fortran '(14i1)' read takes as 00
 #   CaOs2_irrep_j52          j=5/2 of the spin-mixing basis, SO
 #   CaOs2_band_j52           as CaOs2_irrep_j52 along the band path (outband)
 
@@ -26,6 +26,7 @@ import tempfile
 import numpy as np
 
 from triqs_dftkit.wien2k import ctqmcout, outband, symqmc
+from triqs_dftkit.wien2k._dmftproj import read_indmftpr
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -72,10 +73,14 @@ def _setup(tmp, indmftpr, almblm, paramagnetic=False):
     return case
 
 
-def _check(reference, indmftpr, almblm, exts, paramagnetic=False):
+def _check(reference, indmftpr, almblm, exts, paramagnetic=False, correps_line=None):
     tmp = tempfile.mkdtemp()
     try:
         case = _setup(tmp, indmftpr, almblm, paramagnetic)
+        if correps_line is not None:
+            lines = open(case + '.indmftpr').read().splitlines()
+            lines[9] = correps_line
+            open(case + '.indmftpr', 'w').write('\n'.join(lines) + '\n')
         for ext in exts:
             WRITERS[ext](case)
             _compare(f'{case}.{ext}', os.path.join(HERE, f'{reference}.{ext}.gz'))
@@ -104,15 +109,23 @@ def _rejects(correps_lines, message):
 both = ('ctqmcout', 'symqmc')
 _check('CaOs2_irrep_t2g', 'CaOs2_irrep_t2g', 'CaOs2_noso', both)
 _check('CaOs2_irrep_eg', 'CaOs2_irrep_eg', 'CaOs2_noso', both)
-_check('CaOs2_irrep_both', 'CaOs2_irrep_both', 'CaOs2_noso', both)
 _check('CaOs2_irrep_t2g_paramag', 'CaOs2_irrep_t2g', 'CaOs2_noso', both,
        paramagnetic=True)
 _check('CaOs2_irrep_so', 'CaOs2_irrep_so', 'CaOs2', both)
+_check('CaOs2_irrep_so', 'CaOs2_irrep_so', 'CaOs2', both, correps_line='')
 _check('CaOs2_irrep_j52', 'CaOs2_irrep_j52', 'CaOs2', both)
 _check('CaOs2_band_j52', 'CaOs2_band_j52', 'CaOs2_band', ('outband',))
 
 _rejects(['0 0 3 0', '011'], 'the basis has 2')
 _rejects(['0 0 2 0', '00'], 'no irrep')
+_rejects(['0 0 2 0', ''], 'no irrep')
+_rejects(['0 0 2 0', '11'], 'one irrep per shell')
 _rejects(['0 0 6 0', '000001'], 'not possible')
+
+# Selection lines are read one physical line each, also after a blank one.
+_lines = ['1', '1', '3', 'cubic', '0 2 2 0', '0 1 2 0', '', '01', '0', '-2.0 3.0']
+assert read_indmftpr('case.indmftpr', lines=_lines)['sorts'][0]['correps'] == {1: [0], 2: [0, 1]}
+_lines[6:8] = ['1', '']
+assert read_indmftpr('case.indmftpr', lines=_lines)['sorts'][0]['correps'] == {1: [1], 2: [0, 0]}
 
 print('wien2k_irrep_python: ok')
