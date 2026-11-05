@@ -212,3 +212,15 @@ all band-converter arrays, and checks orthonormality of the correlated
 projectors separately for each spin at `1e-12`. The packed-block comparison
 detects interleaving real and imaginary partial projectors by spin, which
 silently exchanges their components when there are two spin blocks.
+
+## Band-index windows
+
+`wien2k_outband_python.py` checks projection modes 1 and 2 for the
+`CaOs2_band`, `CaOs2_band_cubic` and `CaOs2_band_j52` inputs. For these
+one-point paths, mode 1 with -2.0 to 3.0 Ry resolves to band indices 43–92;
+mode 2 selects 43–92 explicitly. Native `dmftproj -sp -so -band` produces
+the same `outband` values as mode 0, so the tests reuse the existing native
+references. To check this equivalence with the native producer, append `1`
+to the window line of each band `indmftpr`, or replace that line with
+`43 92 2`, keeping the final Fermi-energy record unchanged, and use the
+full-precision template recipe above.

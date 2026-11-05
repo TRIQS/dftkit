@@ -51,7 +51,8 @@ import os
 import numpy as np
 from scipy.linalg.blas import zgemm
 
-from ._dmftproj import (validate_spin_windows, dmat, read_almblm, read_dmftsym, read_fromfile,
+from ._dmftproj import (band_index_window, select_band_window, validate_spin_windows,
+                        dmat, read_almblm, read_dmftsym, read_fromfile,
                         read_indmftpr, reptrans, rotloc_orbital, select_window, to_float,
                         write_row)
 from .ctqmcout import _build_crorbs, _select_irreps, _sqrt_inv, write_projector_blocks
@@ -106,8 +107,6 @@ def write_outband(case):
     <case>.dmftsym and <case>.klist_band and write <case>.outband in the
     dmftproj band format."""
     info, eferm = _read_indmftpr_band(case + '.indmftpr')
-    if info['proj_mode'] != 0:
-        raise NotImplementedError('this output currently supports projection mode 0')
     nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
 
     up, dn = case + '.almblmup', case + '.almblmdn'
@@ -134,8 +133,10 @@ def write_outband(case):
 
     if any(sp['nk'] != nk for sp in spins):
         raise ValueError('up/down k-point counts differ')
+    bw = band_index_window(info, spins) if info['proj_mode'] else None
     windows = [[select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
                               info['e_bot'], info['e_top'])
+                if bw is None else select_band_window(kp['nbmin'], kp['nbmax'], *bw)
                 for kp in sp['kp']] for sp in spins]
     if ifSO:
         validate_spin_windows(spins, info, windows[0])
