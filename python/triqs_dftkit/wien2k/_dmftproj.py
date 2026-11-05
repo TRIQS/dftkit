@@ -568,8 +568,10 @@ def read_dmftsym(path, rotloc=False):
     value (setsym.f:437-455)."""
     lines = open(path).read().split('\n')
     nsym = int(lines[0].split()[0])
-    perms = [[int(x) for x in lines[1 + i].split()] for i in range(nsym)]
     starts = [i for i, l in enumerate(lines) if 'Sym. op.' in l]
+    # Wien2k can wrap each atom permutation over several physical lines.
+    perms = np.array([int(x) for line in lines[1:starts[0]]
+                      for x in line.split()]).reshape(nsym, -1).tolist()
     ops = []
     for k, s in enumerate(starts[:nsym]):
         toks = lines[s + 1].split()

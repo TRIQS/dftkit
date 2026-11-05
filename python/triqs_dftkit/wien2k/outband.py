@@ -27,7 +27,7 @@ case.outband feeds the converter method convert_bands_input: it is the
 band-structure analog of case.ctqmcout. The correlated-shell projectors are
 built exactly as in ctqmcout.py (raw Alm/Clm projector -> rot_projectmat local
 rotation -> cubic/fromfile transmat -> Loewdin orthonormalization
-orthogonal_wannier_SO), but evaluated on a band k-path and written in the
+orthogonal_wannier[_SO]), but evaluated on a band k-path and written in the
 outband layout. case.outband also carries the raw radial-normalized Theta
 projector pr_orb%matn_rep for every included shell (the parproj.py path, no
 Loewdin) and the k-path labels.
@@ -36,8 +36,8 @@ Two band-mode differences from the ctqmcout path (dmftproj.f:557-581):
 
 - nkband, the number of k-points along the plotted k-path, is read from
   <case>.klist_band (read_k_list.f). It is written in the header and drives the
-  k-label block; the per-k projector/band data loop over the almblm nk, which is
-  the single representative k-point lapw2 -almd writes in band mode.
+  k-label block; the per-k projector/band data loop over the almblm nk, which
+  must match nkband.
 - the Fermi energy is read from the LAST line of <case>.indmftpr, not from the
   almblm header; the band almblm keeps the eferm record as a placeholder that
   the reader skips (READ(iualmblm,*) with no target).
@@ -106,8 +106,6 @@ def write_outband(case):
     <case>.dmftsym and <case>.klist_band and write <case>.outband in the
     dmftproj band format."""
     info, eferm = _read_indmftpr_band(case + '.indmftpr')
-    if not info['so']:
-        raise NotImplementedError('non-spin-orbit projectors are not implemented yet')
     if info['proj_mode'] != 0:
         raise NotImplementedError('this output currently supports projection mode 0')
     nsym, ops, rotloc_ref = read_dmftsym(case + '.dmftsym', rotloc=True)
@@ -134,14 +132,16 @@ def write_outband(case):
     ncrorb = len(crorbs)
     norb = len(orbs)
 
-    # proj_mode 0 energy window [e_bot, e_top] per k (band path: proj_mode 0).
-    windows = []
-    for ik in range(nk):
-        kp = spins[0]['kp'][ik]
-        windows.append(select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
-                                     info['e_bot'], info['e_top']))
-
-    validate_spin_windows(spins, info, windows)
+    if any(sp['nk'] != nk for sp in spins):
+        raise ValueError('up/down k-point counts differ')
+    windows = [[select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
+                              info['e_bot'], info['e_top'])
+                for kp in sp['kp']] for sp in spins]
+    if ifSO:
+        validate_spin_windows(spins, info, windows[0])
+    elif not all(incl and lo <= hi for spin_windows in windows
+                 for incl, lo, hi in spin_windows):
+        raise ValueError('projectors require a nonempty included window at every k-point')
 
     transmats = {}
     mixing = {}
@@ -154,6 +154,8 @@ def write_outband(case):
                 info['sorts'][o['sort'] - 1]['sourcefile'], o['l'])
         else:
             transmats[key], mixing[key] = reptrans(o['basis'], o['l']), False
+    if not ifSO and any(mixing.values()):
+        raise NotImplementedError('spin-mixing bases require spin-orbit coupling')
     _select_irreps(crorbs, info, mixing, ifSO)
 
     # rot_projectmat local rotation: the op mapping the sort representative onto
@@ -170,12 +172,10 @@ def write_outband(case):
         ref = rotloc_ref[sort - 1]
         rot = rotloc_orbital(l, ref, ops, atom, sum(info['mult'][:sort - 1]) + 1)
         for ik in range(nk):
-            incl, nb_bot, nb_top = windows[ik]
-            if not incl:
-                continue
-            nbsel = nb_top - nb_bot + 1
             spin_blocks = []
             for ispin in range(ns):
+                _, nb_bot, nb_top = windows[ispin][ik]
+                nbsel = nb_top - nb_bot + 1
                 sp = spins[ispin]
                 kp = sp['kp'][ik]
                 off_bot = nb_bot - kp['nbmin']
@@ -198,17 +198,19 @@ def write_outband(case):
                 for ispin in range(ns):
                     mat_rep[(icr, ik, ispin)] = transmat @ spin_blocks[ispin]
 
-    for ik in range(nk):
-        incl, nb_bot, nb_top = windows[ik]
-        if not incl:
-            continue
+    # Without SO the two spins are independent Hilbert spaces.
+    groups = [(ik, None) for ik in range(nk)] if ifSO else [
+        (ik, ispin) for ik in range(nk) for ispin in range(ns)]
+    for ik, gspin in groups:
         layout = []  # (key, rows): the rows of mat_rep[key] that are orthonormalized
         for icr, cr in enumerate(crorbs):
-            if mixing[(cr['l'], cr['sort'])]:
+            if ifSO and mixing[(cr['l'], cr['sort'])]:
                 layout.append(((icr, ik), cr['rows']))
-            else:
+            elif ifSO:
                 for ispin in range(ns):
                     layout.append(((icr, ik, ispin), cr['rows']))
+            else:
+                layout.append(((icr, ik, gspin), cr['rows']))
         D = np.vstack([mat_rep[key][rows] for key, rows in layout])
         # match the Fortran's exact BLAS calls (orthogonal_wannier_SO): the
         # near-singular O^{-1/2} amplifies any last-bit difference, so use the
@@ -232,10 +234,14 @@ def write_outband(case):
         rot = rotloc_orbital(l, ref, ops, o['atom'], iref)
         if mixing[(l, o['sort'])]:
             matn_reps[(o['atom'], o['l'])] = _build_matn_rep_mixing(
-                o, info, spins, windows, transmat, rot)
+                o, info, spins, windows[0], transmat, rot)
         else:
-            matn_reps[(o['atom'], o['l'])] = _build_matn_rep(
-                o, info, spins, windows, transmat, rot)
+            blocks = {}
+            for ispin, sp in enumerate(spins):
+                blocks.update({(ik, ispin): block for (ik, _), block in
+                               _build_matn_rep(o, info, [sp], windows[ispin],
+                                               transmat, rot).items()})
+            matn_reps[(o['atom'], o['l'])] = blocks
 
     # ---- write ----
     with open(case + '.outband', 'w') as f:
@@ -246,7 +252,7 @@ def write_outband(case):
             if ifSP and ifSO and ispin == 1:
                 continue
             for ik in range(nk):
-                incl, nb_bot, nb_top = windows[ik]
+                incl, nb_bot, nb_top = windows[ispin][ik]
                 f.write('%6d\n' % abs(nb_top - nb_bot + 1))
 
         # correlated projector block: DO ik, DO icrorb (Loewdin orthonormalized).
@@ -260,7 +266,7 @@ def write_outband(case):
             if ifSO and ispin == 1:
                 continue
             for ik in range(nk):
-                incl, nb_bot, nb_top = windows[ik]
+                incl, nb_bot, nb_top = windows[ispin][ik]
                 kp = spins[ispin]['kp'][ik]
                 for ib in range(nb_bot, nb_top + 1):
                     f.write(' %.16E\n' % kp['eband'][ib - kp['nbmin']])
@@ -278,9 +284,6 @@ def write_outband(case):
             n = spins[0]['nLO'][(l, o['sort'])] + 2
             ismix = mixing[(l, o['sort'])]
             for ik in range(nk):
-                incl, nb_bot, nb_top = windows[ik]
-                if not incl:
-                    continue
                 for ir in range(n):
                     if ismix:
                         P = matn_reps[(atom, l)][ik][:, :, ir]
