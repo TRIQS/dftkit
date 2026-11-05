@@ -794,3 +794,27 @@ def validate_spin_windows(spins, info, windows, below=None):
                     raise ValueError('projector run requires identical up/dn below-window bands')
     if not all(incl and lo <= hi for incl, lo, hi in windows):
         raise ValueError('projectors require a nonempty included window at every k-point')
+
+
+def projector_windows(info, spins):
+    """Selected and below-window bands for each spin and k-point."""
+    if any(sp['nk'] != spins[0]['nk'] for sp in spins):
+        raise ValueError('up/down k-point counts differ')
+    bw = band_index_window(info, spins) if info['proj_mode'] else None
+    windows, below = [], []
+    for sp in spins:
+        if bw is None:
+            windows.append([select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
+                                           info['e_bot'], info['e_top']) for kp in sp['kp']])
+            below.append([select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
+                                         -1e6, info['e_bot']) for kp in sp['kp']])
+        else:
+            windows.append([select_band_window(kp['nbmin'], kp['nbmax'], *bw)
+                            for kp in sp['kp']])
+            below.append([select_band_window(kp['nbmin'], kp['nbmax'], 1, bw[0] - 1)
+                          for kp in sp['kp']])
+    if info['so']:
+        validate_spin_windows(spins, info, windows[0], below[0])
+    elif not all(incl and lo <= hi for spin in windows for incl, lo, hi in spin):
+        raise ValueError('projectors require a nonempty included window at every k-point')
+    return windows, below
