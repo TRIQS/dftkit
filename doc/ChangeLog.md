@@ -13,6 +13,7 @@ this section to the version number when the next release is cut.
 
 ### Wien2k
 * Support non-spin-orbit band projectors in the Python `case.outband` generator, including independent spin windows; correct the spin ordering when converting their partial projectors and read wrapped atom permutations from Wien2k symmetry files
+* Support the `cubic` f-shell basis in the Python Wien2k projector generators, matching the native `case.cf_f_mm2` basis and its irreducible representations
 * Support the selection of individual irreducible representations of a correlated shell in `case.indmftpr` (e.g. only t2g or eg of a cubic d shell, or j=5/2 of a `fromfile` |j, m_j> basis) in the Python `case.ctqmcout`, `case.symqmc` and `case.outband` generators, matching native dmftproj. As in dmftproj, a spin-diagonal basis under spin-orbit coupling keeps the whole shell. Selecting more than one irrep of a shell is refused, since the Wien2k converter cannot read the resulting files
 * Add pure-Python band-mode projectors, projection modes 1/2, and custom `fromfile` bases, including spin-mixing bases, to the Wien2k projector generators
 * Read the high-symmetry k-path labels from the end of `case.outband` and store them as `kpts_labels` / `kpts_labels_idx` in `dft_bands_input`, matching the VASP band conversion

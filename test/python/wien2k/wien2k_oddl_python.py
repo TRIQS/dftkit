@@ -14,9 +14,8 @@
 # promoted to a complex p or f shell.
 #   p (l=1): the standard almblm, wide window -2..3 (6 spin-orbitals/atom), so
 #     the projector path (ctqmcout) is checked as well.
-#   f (l=3): only symqmc, which needs no almblm. An f projector reference needs
-#     a high-band-cutoff almblm (Os has no f weight near E_F), several MB that
-#     we keep out of the repository.
+#   f (l=3): complex-basis symmetry, plus all generators in Wien2k's mm2
+#     cubic basis over the full retained band range, with and without SO.
 
 import gzip
 import os
@@ -25,7 +24,8 @@ import tempfile
 
 import numpy as np
 
-from triqs_dftkit.wien2k import ctqmcout, symqmc
+from triqs_dftkit.wien2k import ctqmcout, parproj, symqmc, sympar
+from triqs_dftkit.wien2k._dmftproj import basis_dreps, reptrans
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -51,7 +51,7 @@ def _compare(got_path, ref_gz):
                                equal_nan=False)
 
 
-def _check(case, almblm_case, exts):
+def _check(case, almblm_case, exts, paramagnetic=False):
     tmp = tempfile.mkdtemp()
     try:
         shutil.copy(os.path.join(HERE, f'{case}.indmftpr'),
@@ -59,14 +59,14 @@ def _check(case, almblm_case, exts):
         for ext in ('struct', 'dmftsym'):
             shutil.copy(os.path.join(HERE, f'CaOs2.{ext}'),
                         os.path.join(tmp, f'{case}.{ext}'))
-        for spin in ('up', 'dn') if almblm_case else ():
+        for spin in (('up',) if paramagnetic else ('up', 'dn')) if almblm_case else ():
             _gunzip(os.path.join(HERE, f'{almblm_case}.almblm{spin}.gz'),
-                    os.path.join(tmp, f'{case}.almblm{spin}'))
+                    os.path.join(tmp, f'{case}.almblm' + ('' if paramagnetic else spin)))
         case_path = os.path.join(tmp, case)
         for ext, writer in exts:
             writer(case_path)
             _compare(case_path + '.' + ext,
-                     os.path.join(HERE, f'{case}.{ext}.gz'))
+                     os.path.join(HERE, f'{case}.{"symqmc" if ext == "sympar" else ext}.gz'))
     finally:
         shutil.rmtree(tmp)
 
@@ -77,5 +77,17 @@ _check('CaOs2_pshell', 'CaOs2',
 
 # f shell: symmetry output only.
 _check('CaOs2_fshell', None, [('symqmc', symqmc.write_symqmc)])
+
+all_outputs = [('ctqmcout', ctqmcout.write_ctqmcout), ('parproj', parproj.write_parproj),
+               ('symqmc', symqmc.write_symqmc), ('sympar', sympar.write_sympar)]
+_check('CaOs2_fcubic_so', 'CaOs2', all_outputs)
+_check('CaOs2_fcubic_sp', 'CaOs2_noso', all_outputs)
+_check('CaOs2_fcubic_pm', 'CaOs2_noso', all_outputs, paramagnetic=True)
+_check('CaOs2_fcubic_a2', 'CaOs2_noso',
+       [('ctqmcout', ctqmcout.write_ctqmcout), ('symqmc', symqmc.write_symqmc)])
+
+np.testing.assert_allclose(reptrans('cubic', 3) @ reptrans('cubic', 3).conj().T,
+                           np.eye(7), atol=1e-14, rtol=0)
+assert basis_dreps('cubic', 3) == [2, 1, 2, 2]
 
 print('wien2k_oddl_python: ok')
