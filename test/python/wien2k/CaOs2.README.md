@@ -212,3 +212,33 @@ all band-converter arrays, and checks orthonormality of the correlated
 projectors separately for each spin at `1e-12`. The packed-block comparison
 detects interleaving real and imaginary partial projectors by spin, which
 silently exchanges their components when there are two spin blocks.
+
+## The cubic f-shell option
+
+For f shells, native dmftproj's `cubic` option uses the mm2 basis in
+`fortran/dmftproj/SRC_templates/case.cf_f_mm2`. Its irreducible
+representations, in row order, have dimensions 2, 1, 2 and 2 (A1, A2, B1
+and B2). Python uses the same row order and complex phases, with exact
+double-precision coefficients.
+
+The `CaOs2_fcubic_{so,sp,pm}` references reuse the retained `CaOs2` (SO) or
+`CaOs2_noso` (no SO) coefficients. The window -100 to 100 Ry includes the
+full retained band range and gives a full-rank f subspace. The single-spin
+case uses the retained up-channel coefficients as `case.almblm` and checks
+that format, not a new paramagnetic DFT calculation. `CaOs2_fcubic_a2`
+selects only the second mm2 irrep without SO.
+
+Using the `ref` function above, also copy the shipped `case.cf_f_mm2` to
+`$WIENROOT/SRC_templates`, then run:
+
+```sh
+ref CaOs2_fcubic_so CaOs2_fcubic_so CaOs2      sp "-sp -so" ctqmcout parproj symqmc
+ref CaOs2_fcubic_sp CaOs2_fcubic_sp CaOs2_noso sp "-sp"     ctqmcout parproj symqmc
+ref CaOs2_fcubic_pm CaOs2_fcubic_pm CaOs2_noso pm ""        ctqmcout parproj symqmc
+ref CaOs2_fcubic_a2 CaOs2_fcubic_a2 CaOs2_noso sp "-sp"     ctqmcout symqmc
+```
+
+The full-shell `sympar` and `symqmc` files are identical, so the test reuses
+one reference for both generators. `wien2k_oddl_python.py` compares every
+output value at absolute tolerance `1e-11` and independently checks basis
+unitarity. No new projector coefficients or k-points were constructed.
