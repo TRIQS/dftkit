@@ -36,11 +36,12 @@ mimics the Fortran binary: the case name is the working-directory basename.
 case.almblm{up,dn} and spin-orbit from case.indmftpr; the command checks that
 -sp and -so agree with these inputs and exits with an error otherwise.
 
-Unsupported inputs raise explicitly: selected irreducible subspaces, cubic f
-harmonics, multiple local orbitals per angular momentum, spin-mixing bases
-without SO, differing SO flags across correlated sorts, and non-SO band paths.
-Band paths currently require projection mode 0. Two-spin projector generation
-requires matching selected and below-window bands in both spin channels.
+Unsupported inputs raise explicitly: selecting more than one irreducible
+subspace of a shell, cubic f harmonics, multiple local orbitals per angular
+momentum, spin-mixing bases without spin-orbit coupling, and differing
+spin-orbit flags across correlated sorts. Band paths currently require
+projection mode 0. Two-spin ordinary-projector generation requires the same
+absolute selected-band and below-window ranges in both spin channels.
 """
 
 import os

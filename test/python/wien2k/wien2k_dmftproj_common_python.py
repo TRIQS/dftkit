@@ -147,6 +147,17 @@ with tempfile.TemporaryDirectory() as tmp:
     assert len(refs) == 2
     np.testing.assert_allclose(refs[1]['a'], np.pi / 2, atol=1e-14, rtol=0)
 
+    path = os.path.join(tmp, 'wrapped.dmftsym')
+    with open(path, 'w') as fh:
+        fh.write('2\n1 2 3 4 5 6\n7 8 9\n9 8 7 6 5 4\n3 2 1\n\n'
+                 'Sym. op. 1\n0 0 0 1\n1 0 0\n0 1 0\n0 0 1\n\n'
+                 'Sym. op. 2\n180 0 0 1\n-1 0 0\n0 -1 0\n0 0 1\n')
+    nsym, ops = dp.read_dmftsym(path)
+    assert nsym == 2
+    assert ops[0]['perm'] == list(range(1, 10))
+    assert ops[1]['perm'] == list(range(9, 0, -1))
+    np.testing.assert_allclose(ops[1]['a'], np.pi, atol=1e-14, rtol=0)
+
     # A tiny but nonzero spin coupling must retain the full spinor basis.
     theta = 1e-9
     basis = np.eye(6)
