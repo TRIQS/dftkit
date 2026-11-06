@@ -167,3 +167,48 @@ and t2g) makes native dmftproj write one correlated-shell entry per irrep
 under a shell count per atom, which the Wien2k converter cannot read; the
 Python generators refuse it. To correlate the whole shell, set its irrep
 count to 0.
+
+## Band references without spin-orbit coupling
+
+`wien2k_outband_python.py` also checks non-spin-orbit band projectors using
+the retained `CaOs2_noso.almblmup.gz` and `CaOs2_noso.almblmdn.gz`, the same
+one-point `CaOs2_band.klist_band`, and the full-precision cubic-d template
+described above. These references reuse the published coefficients without
+constructing new k-points. The paramagnetic cases use the up-spin file as
+`case.almblm`; they check the single-spin format rather than a new
+paramagnetic DFT calculation.
+
+| reference suffix | spins | correlated Os basis | selected bands per spin |
+|------------------|-------|---------------------|-------------------------|
+| `noso`           | up, dn | cubic d            | 61, 61                  |
+| `noso_pm`        | single | cubic d            | 61                      |
+| `noso_t2g`       | up, dn | cubic t2g          | 61, 61                  |
+| `noso_eg`        | up, dn | cubic eg           | 61, 61                  |
+| `noso_complex`   | single | complex d          | 61                      |
+| `noso_unequal`   | up, dn | cubic d            | 21, 20                  |
+
+Each prefix is `CaOs2_band_`. The shipped band `indmftpr` files append the
+retained Fermi energy, 0.641641524000631 Ry. The unequal-window case places
+its upper bound between the two spin energies of a retained band; the
+other cases use -2.0 to 3.0 Ry. The full-d cases also include an
+uncorrelated Ca d shell, so partial-projector conversion covers both kinds
+of shell and multiple radial channels.
+
+With the `ref` function and full-precision template from the preceding
+recipe, regenerate the native `outband` files with:
+
+```sh
+ref CaOs2_band_noso         CaOs2_band_noso         CaOs2_noso sp "-sp -band" outband
+ref CaOs2_band_noso_pm      CaOs2_band_noso_pm      CaOs2_noso pm "-band"     outband
+ref CaOs2_band_noso_t2g     CaOs2_band_noso_t2g     CaOs2_noso sp "-sp -band" outband
+ref CaOs2_band_noso_eg      CaOs2_band_noso_eg      CaOs2_noso sp "-sp -band" outband
+ref CaOs2_band_noso_complex CaOs2_band_noso_complex CaOs2_noso pm "-band"     outband
+ref CaOs2_band_noso_unequal CaOs2_band_noso_unequal CaOs2_noso sp "-sp -band" outband
+```
+
+The test compares every output value against native dmftproj at absolute
+tolerance `1e-11`, independently decodes its packed spin blocks to check
+all band-converter arrays, and checks orthonormality of the correlated
+projectors separately for each spin at `1e-12`. The packed-block comparison
+detects interleaving real and imaginary partial projectors by spin, which
+silently exchanges their components when there are two spin blocks.
