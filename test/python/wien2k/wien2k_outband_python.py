@@ -69,12 +69,21 @@ def _isfloat(tok):
         return False
 
 
-def _check(case, inputs=None):
+def _check(case, inputs=None, mode=0):
     inputs = inputs or case
     tmp = tempfile.mkdtemp()
     try:
         shutil.copy(os.path.join(HERE, f'{case}.indmftpr'),
                     os.path.join(tmp, f'{case}.indmftpr'))
+        if mode:
+            path = os.path.join(tmp, f'{case}.indmftpr')
+            with open(path) as fh:
+                lines = fh.read().splitlines()
+            window = [i for i, line in enumerate(lines) if line.strip()][-2]
+            lines[window] = lines[window] + ' 1' if mode == 1 else '43 92 2'
+            with open(path, 'w') as fh:
+                fh.write('\n'.join(lines) + '\n')
+            assert outband._read_indmftpr_band(path)[0]['proj_mode'] == mode
         shutil.copy(os.path.join(HERE, f'{inputs}.klist_band'),
                     os.path.join(tmp, f'{case}.klist_band'))
         shutil.copy(os.path.join(HERE, 'jbasis_d.dat'),
@@ -205,5 +214,9 @@ _check_nonso('CaOs2_band_noso_t2g', 'CaOs2_irrep_t2g')
 _check_nonso('CaOs2_band_noso_eg', 'CaOs2_irrep_eg')
 _check_nonso('CaOs2_band_noso_complex', 'CaOs2_noso_partial', paramagnetic=True)
 _check_nonso('CaOs2_band_noso_unequal', 'CaOs2_noso_partial')
+
+for basis in ('CaOs2_band', 'CaOs2_band_cubic', 'CaOs2_band_j52'):
+    for mode in (1, 2):
+        _check(basis, inputs='CaOs2_band', mode=mode)
 
 print('wien2k_outband_python: ok')
