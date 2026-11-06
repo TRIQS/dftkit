@@ -29,8 +29,10 @@ import shutil
 import tempfile
 
 import numpy as np
+from h5 import HDFArchive
 
-from triqs_dftkit.wien2k import ctqmcout, symqmc, sympar, parproj
+from triqs_dftkit.wien2k import Converter, ctqmcout, symqmc, sympar, parproj, oubwin
+from triqs_dftkit.wien2k._dmftproj import read_almblm, read_indmftpr, select_window
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -149,5 +151,53 @@ for module in (symqmc, sympar):
         assert 'spin-mixing' in str(error)
     else:
         raise AssertionError('non-SO symmetry accepted a spinor basis')
+
+
+def _check_spin_windows(case, which):
+    tmp = _stage(case)
+    try:
+        prefix = os.path.join(tmp, case)
+        shutil.copy(os.path.join(HERE, 'CaOs2.outputs'), prefix + '.outputs')
+        writers = dict(ctqmcout=ctqmcout.write_ctqmcout, parproj=parproj.write_parproj,
+                       oubwinup=oubwin.write_oubwin, oubwindn=oubwin.write_oubwin)
+        for ext, writer in writers.items():
+            writer(prefix)
+            reference = os.path.join(HERE, f'{case}.{ext}')
+            opener = open if ext.startswith('oubwin') else gzip.open
+            with opener(reference if ext.startswith('oubwin') else reference + '.gz', 'rt') as fh:
+                _compare(prefix + '.' + ext, fh.readlines())
+        symqmc.write_symqmc(prefix)
+        sympar.write_sympar(prefix)
+        converter = Converter(filename=prefix)
+        converter.convert_dft_input()
+        converter.convert_parproj_input()
+        info = read_indmftpr(prefix + '.indmftpr')
+        spins = [read_almblm(prefix + '.almblm' + s, info) for s in ('up', 'dn')]
+        windows = [select_window(sp['kp'][0]['nbmin'], sp['kp'][0]['nbmax'],
+                                 sp['kp'][0]['eband'], info['e_bot'], info['e_top'])
+                   for sp in spins]
+        assert windows[0][which] != windows[1][which]
+        below = [select_window(sp['kp'][0]['nbmin'], sp['kp'][0]['nbmax'],
+                               sp['kp'][0]['eband'], -1e6, info['e_bot']) for sp in spins]
+        charge = sum((hi - lo + 1) * sp['kp'][0]['weight']
+                     for sp, (included, lo, hi) in zip(spins, below) if included)
+        with HDFArchive(converter.hdf_file, 'r') as ar:
+            dft = ar[converter.dft_subgrp]
+            np.testing.assert_allclose(dft['charge_below'], charge, atol=1e-12, rtol=0)
+            for isp, (_, lo, hi) in enumerate(windows):
+                n = hi - lo + 1
+                assert dft['n_orbitals'][0, isp] == n
+                p = np.vstack([dft['proj_mat'][0, isp, ish, :s['dim'], :n]
+                               for ish, s in enumerate(dft['corr_shells'])])
+                np.testing.assert_allclose(p @ p.conj().T, np.eye(len(p)),
+                                           atol=1e-12, rtol=0)
+                for matrix in ar[converter.parproj_subgrp]['dens_mat_below'][isp]:
+                    np.testing.assert_allclose(matrix, matrix.conj().T, atol=1e-12, rtol=0)
+    finally:
+        shutil.rmtree(tmp)
+
+
+_check_spin_windows('CaOs2_spin_window_top', 2)
+_check_spin_windows('CaOs2_spin_window_bottom', 1)
 
 print('wien2k_noso_python: ok')

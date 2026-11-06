@@ -57,9 +57,9 @@ rot_dens.f / setsym.f / set_rotloc.f for the symmetrization and Rloc rotation.
 import os
 import numpy as np
 
-from ._dmftproj import (build_orbs as _build_orbs, validate_spin_windows, band_index_window, dmat, mixing_rotrep, paramag_time_op,
+from ._dmftproj import (build_orbs as _build_orbs, projector_windows, dmat, mixing_rotrep, paramag_time_op,
                         read_almblm, read_dmftsym, read_fromfile, read_indmftpr, reptrans,
-                        rotloc_orbital, rotloc_rotl_so, select_band_window, select_window, tmat, write_row)
+                        rotloc_orbital, rotloc_rotl_so, tmat, write_row)
 
 
 def _op_timeinv(op, ifSO=True):
@@ -290,12 +290,6 @@ def _orbital_densmat_blocks(orb, info, spins, windows, matn_reps):
     nblocks = 4 if info['so'] else len(spins)
     blocks = [np.zeros((d, d), dtype=complex) for _ in range(nblocks)]
     for ik in range(info['nk']):
-        incl, nb_bot, nb_top = windows[ik]
-        if not incl:
-            continue
-        kp0 = spins[0]['kp'][ik]
-        off_bot = nb_bot - kp0['nbmin']
-        off_top = nb_top - kp0['nbmin']
         n = spins[0]['nLO'][(l, orb['sort'])] + 2
         for iss in range(1, nblocks + 1):
             if iss <= 2:
@@ -304,6 +298,8 @@ def _orbital_densmat_blocks(orb, info, spins, windows, matn_reps):
                 is_ = iss - 2
                 is1 = 3 - is_
             isp, isp1 = is_ - 1, is1 - 1
+            if not windows[isp][ik][0]:
+                continue
             weight = spins[isp]['kp'][ik]['weight']
             acc = np.zeros((d, d), dtype=complex)
             for i in range(n):
@@ -444,29 +440,7 @@ def write_parproj(case):
 
     orbs = _build_orbs(info)
 
-    # Two band ranges (dmftproj.f:798,836): the energy window [e_bot, e_top]
-    # for the written Theta projector (block A), and the bands below e_bot
-    # (-Elarge, e_bot) for the density matrix. dmftproj computes the density
-    # matrix over the below-e_bot range with point integration LAST (the third
-    # density call is correlated-only), so densmat in outputqmc is that one.
-    windows = []
-    below_windows = []
-    bw = band_index_window(info, spins) if info['proj_mode'] else None
-    for ik in range(nk):
-        kp = spins[0]['kp'][ik]
-        if bw is None:
-            windows.append(select_window(kp['nbmin'], kp['nbmax'], kp['eband'],
-                                          info['e_bot'], info['e_top']))
-            below_windows.append(select_window(kp['nbmin'], kp['nbmax'],
-                                                kp['eband'], -1e6, info['e_bot']))
-        else:
-            windows.append(select_band_window(kp['nbmin'], kp['nbmax'], *bw))
-            below_windows.append(select_band_window(kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
-
-    if ifSO or ifSP:
-        validate_spin_windows(spins, info, windows, below_windows)
-    elif not all(window[0] and window[1] <= window[2] for window in windows):
-        raise ValueError('projectors require a nonempty included window at every k-point')
+    windows, below_windows = projector_windows(info, spins)
 
     transmats = {}
     mixing = {}
@@ -494,14 +468,17 @@ def write_parproj(case):
         rot = rotloc_orbital(l, ref, ops, o['atom'], iref)
         if mixing[(l, o['sort'])]:
             matn_reps[(o['atom'], o['l'])] = _build_matn_rep_mixing(
-                o, info, spins, windows, transmat, rot)
+                o, info, spins, windows[0], transmat, rot)
             matn_reps_full[(o['atom'], o['l'])] = _build_matn_rep_mixing(
-                o, info, spins, below_windows, transmat, rot)
+                o, info, spins, below_windows[0], transmat, rot)
         else:
-            matn_reps[(o['atom'], o['l'])] = _build_matn_rep(
-                o, info, spins, windows, transmat, rot)
-            matn_reps_full[(o['atom'], o['l'])] = _build_matn_rep(
-                o, info, spins, below_windows, transmat, rot)
+            for ranges, target in ((windows, matn_reps), (below_windows, matn_reps_full)):
+                blocks = {}
+                for ispin, sp in enumerate(spins):
+                    blocks.update({(ik, ispin): block for (ik, _), block in
+                                   _build_matn_rep(o, info, [sp], ranges[ispin],
+                                                   transmat, rot).items()})
+                target[(o['atom'], o['l'])] = blocks
 
     # ---- rotloc rotrep per orbital ----
     rotloc_rotrep = {}
@@ -563,7 +540,7 @@ def write_parproj(case):
             ti = _op_timeinv(op)
             rotreps.append((mixing_rotrep(op, l, transmats[(l, sort)], ti), ti))
         raw = {o['atom']: _orbital_densmat_mixing(
-            o, info, spins, below_windows, matn_reps_full) for o in group}
+            o, info, spins, below_windows[0], matn_reps_full) for o in group}
         sym = _symmetrize_densmat_mixing(group, ops, nsym, rotreps, raw)
         for o in group:
             key = (o['atom'], l)
@@ -585,7 +562,6 @@ def write_parproj(case):
             # (A) Theta projector (outputqmc.f:935-973). Mixing writes the full
             # 2(2l+1) block from is=1 only; non-mixing one (2l+1) block per input spin.
             for ik in range(nk):
-                incl, nb_bot, nb_top = windows[ik]
                 for ir in range(n):
                     if ismix:
                         P = matn_reps[(atom, l)][ik][:, :, ir]
