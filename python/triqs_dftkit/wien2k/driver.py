@@ -25,6 +25,7 @@ import numpy as np
 import triqs.utility.mpi as mpi
 
 from .converter import Converter
+from .dmftproj import run_dmftproj
 from ..converter_tools import ConverterTools
 
 
@@ -87,9 +88,9 @@ class Driver(object):
         archive modest reads is ``<seedname>.h5``.
     wienroot : str
         WIEN2k installation directory; ``<wienroot>/x`` launches every program.
-    dmftproj_exe : str
-        The dmftproj executable.  Looked up on $PATH by default, matching how
-        run_lapw invokes it.
+    dmftproj_exe : str or None
+        Optional external dmftproj executable.  By default the bundled Python
+        implementation is called directly.
     max_scf_iter : int
         Iteration cap for the initial SCF loop.
     ecut, ccut : float
@@ -101,11 +102,12 @@ class Driver(object):
 
     Notes
     -----
-    ``wienroot`` and ``dmftproj_exe`` are the only coupling to WIEN2k, so a fake
-    WIEN2k can be substituted for testing by pointing them elsewhere.
+    ``wienroot`` is the only required coupling to WIEN2k.  A fake WIEN2k can be
+    substituted for testing by pointing it elsewhere; ``dmftproj_exe`` remains
+    available for testing or running an external projector implementation.
     """
 
-    def __init__(self, seedname, wienroot=None, dmftproj_exe='dmftproj',
+    def __init__(self, seedname, wienroot=None, dmftproj_exe=None,
                  max_scf_iter=100, ecut=1e-4, ccut=1e-4, verbosity=1):
         self.seedname = seedname
         self.wienroot = wienroot if wienroot is not None else os.getenv('WIENROOT')
@@ -264,7 +266,13 @@ class Driver(object):
                 f"{self._f('indmftpr')} not found; copy and edit "
                 f"{os.path.join(self.wienroot, 'SRC_templates', 'case.indmftpr')}"
                 "or use the command line tool init_dmftpr")
-        return self._run_checked([self.dmftproj_exe], 'dmftproj.error', 'dmftproj')
+        if self.dmftproj_exe is not None:
+            return self._run_checked([self.dmftproj_exe], 'dmftproj.error', 'dmftproj')
+        try:
+            run_dmftproj(self.seedname)
+        except Exception as error:
+            raise DFTWorkflowError(f"dmftproj failed: {error}") from error
+        return 0
 
     # ------------------------------------------------------------- scf output
 
