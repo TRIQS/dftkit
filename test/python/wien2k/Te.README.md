@@ -65,7 +65,9 @@ reference is produced in a directory named after it:
 so that a two-fold axis, magnetic under spin-orbit, maps the representative
 onto each atom. `$WIENROOT/SRC_templates` must hold the full-precision
 `case.cf_p_cubic` from `fortran/dmftproj/SRC_templates`. From
-`test/python/wien2k`, with `DMFTPROJ` the built `fortran/dmftproj/dmftproj`:
+`test/python/wien2k`, with `DMFTPROJ` the native `fortran/dmftproj/dmftproj` of
+a build tree configured with `-DBuild_dmftproj_fortran=ON` (the installed
+`dmftproj` is the Python port):
 
 ```sh
 src=$PWD; out=$(mktemp -d)
