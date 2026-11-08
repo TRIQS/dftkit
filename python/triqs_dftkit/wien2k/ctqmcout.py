@@ -64,10 +64,10 @@ import numpy as np
 from scipy.linalg.lapack import zheev
 from scipy.linalg.blas import zgemm
 
-from ._dmftproj import (build_orbs as _build_orbs, validate_spin_windows, band_index_window, dmat, fmt_scalar, read_almblm,
+from ._dmftproj import (build_orbs as _build_orbs, projector_windows, dmat, fmt_scalar, read_almblm,
                         basis_dreps, block_rows, irrep_blocks,
                         read_dmftsym, read_fromfile, read_indmftpr, reptrans,
-                        rotloc_orbital, rotloc_rotl_so, select_band_window, select_window,
+                        rotloc_orbital, rotloc_rotl_so,
                         tmat, write_row)
 
 
@@ -205,44 +205,13 @@ def write_ctqmcout(case):
     ncrorb = len(crorbs)
     norb = len(orbs)
 
-    # band-index window for proj_mode 1/2 (set_projections is called with band
-    # indices, not energies). proj_mode 1 scans all spins for the global window.
-    bw = band_index_window(info, spins) if info['proj_mode'] != 0 else None
-
-    # window in [e_bot, e_top]  (proj_mode 0) or [b_bot, b_top]  (mode 1/2)
-    windows = []
-    for ik in range(nk):
-        kp = spins[0]['kp'][ik]
-        if info['proj_mode'] == 0:
-            windows.append(select_window(
-                kp['nbmin'], kp['nbmax'], kp['eband'],
-                info['e_bot'], info['e_top']))
-        else:
-            windows.append(select_band_window(
-                kp['nbmin'], kp['nbmax'], bw[0], bw[1]))
-
-    # window below e_bot (mode 0) or below b_bot (mode 1/2), for qbbot.
-    # Mode 1/2: set_projections(1, b_bot-1) -> select_band_window with top=b_bot-1.
-    win_below = []
-    for ik in range(nk):
-        kp = spins[0]['kp'][ik]
-        if info['proj_mode'] == 0:
-            win_below.append(select_window(
-                kp['nbmin'], kp['nbmax'], kp['eband'], -1e6, info['e_bot']))
-        else:
-            win_below.append(select_band_window(
-                kp['nbmin'], kp['nbmax'], 1, bw[0] - 1))
-
-    if ifSO or len(spins) == 2:
-        validate_spin_windows(spins, info, windows, win_below)
-    elif not all(window[0] and window[1] <= window[2] for window in windows):
-        raise ValueError('projectors require a nonempty included window at every k-point')
+    windows, win_below = projector_windows(info, spins)
 
     # qbbot: point integration over bands below e_bot, is=1 only under SO
     qbbot = 0.0
     for ispin in range(ns):
         for ik in range(nk):
-            incl, nb_bot, nb_top = win_below[ik]
+            incl, nb_bot, nb_top = win_below[ispin][ik]
             if incl:
                 qbbot += (nb_top - nb_bot + 1) * spins[ispin]['kp'][ik]['weight']
         if ifSO:
@@ -281,12 +250,10 @@ def write_ctqmcout(case):
         ref = rotloc_ref[sort - 1]
         rot = rotloc_orbital(l, ref, ops, atom, sum(info['mult'][:sort - 1]) + 1)
         for ik in range(nk):
-            incl, nb_bot, nb_top = windows[ik]
-            if not incl:
-                continue
-            nbsel = nb_top - nb_bot + 1
             spin_blocks = []
             for ispin in range(ns):
+                _, nb_bot, nb_top = windows[ispin][ik]
+                nbsel = nb_top - nb_bot + 1
                 sp = spins[ispin]
                 kp = sp['kp'][ik]
                 off_bot = nb_bot - kp['nbmin']
@@ -320,9 +287,6 @@ def write_ctqmcout(case):
         ortho_groups = [[(ik, ispin)] for ik in range(nk) for ispin in range(ns)]
     for group in ortho_groups:
         (ik, gspin) = group[0]
-        incl, nb_bot, nb_top = windows[ik]
-        if not incl:
-            continue
         layout = []  # (key, rows): the rows of mat_rep[key] that are orthonormalized
         for icr, cr in enumerate(crorbs):
             if ifSO and mixing[(cr['l'], cr['sort'])]:
@@ -431,7 +395,7 @@ def write_ctqmcout(case):
             if ifSP and ifSO and ispin == 1:
                 continue
             for ik in range(nk):
-                incl, nb_bot, nb_top = windows[ik]
+                incl, nb_bot, nb_top = windows[ispin][ik]
                 f.write('%6d\n' % abs(nb_top - nb_bot + 1))
 
         # projector block: DO ik, DO icrorb, DO correlated irrep.
@@ -449,7 +413,7 @@ def write_ctqmcout(case):
             if ifSP and ifSO and ispin == 1:
                 continue
             for ik in range(nk):
-                incl, nb_bot, nb_top = windows[ik]
+                incl, nb_bot, nb_top = windows[ispin][ik]
                 kp = spins[ispin]['kp'][ik]
                 for ib in range(nb_bot, nb_top + 1):
                     f.write(' %s\n' % fmt_scalar(kp['eband'][ib - kp['nbmin']]))
