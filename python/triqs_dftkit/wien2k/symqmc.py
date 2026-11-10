@@ -48,8 +48,8 @@ through single-precision CMPLX differs from this output at about 1e-7.
 
 import os
 
-from ._dmftproj import (basis_dreps, irrep_blocks, paramag_time_op, read_dmftsym,
-                        read_fromfile, read_indmftpr, reptrans, shell_matrix)
+from ._dmftproj import (basis_dreps, check_irrep_invariance, irrep_blocks, paramag_time_op,
+                        read_dmftsym, read_fromfile, read_indmftpr, reptrans, shell_matrix)
 
 _shell_matrix = shell_matrix
 
@@ -105,6 +105,8 @@ def write_symqmc(case):
     natom = len(ops[0]['perm'])
 
     ifSO = bool(so)
+    for sh in shells:
+        check_irrep_invariance(ops, sh, ifSO)
     ifSP = (os.path.exists(case + '.almblmup')
             and os.path.exists(case + '.almblmdn')) or ifSO
 
