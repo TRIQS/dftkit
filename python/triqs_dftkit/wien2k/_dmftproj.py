@@ -501,6 +501,41 @@ def block_rows(blocks):
     return np.concatenate([np.arange(off, off + d) for off, d, _ in blocks])
 
 
+def symmetry_timeinv(op, ifSO):
+    """Time-reversal flag of a symmetry operation: set under spin-orbit
+    coupling for the operations that flip the magnetization (setsym.f)."""
+    k = op['krotm']
+    return int(ifSO and k[0, 0] * k[1, 1] - k[0, 1] * k[1, 0] < 0.0)
+
+
+IRREP_INVARIANCE_TOL = 1e-6
+
+
+def check_irrep_invariance(ops, shell, ifSO):
+    """Raise ValueError if a symmetry operation mixes the selected irrep rows
+    of shell (dict with l, P, mixing, blocks) with the other rows of its
+    basis. Only an invariant selection has unitary symmetry matrices and
+    closed projectors; a basis whose irreps belong to a higher symmetry than
+    the site (e.g. the cubic f irreps of point group mm2 on an Oh site) does
+    not. A shell without irrep selection always passes."""
+    blocks = shell.get('blocks')
+    if blocks is None:
+        return
+    rows = block_rows(blocks)
+    n = shell['P'].shape[0]
+    rest = np.setdiff1d(np.arange(n), rows)
+    for isym, op in enumerate(ops):
+        mat = shell_matrix(op, shell, symmetry_timeinv(op, ifSO), ifSO)
+        leak = max(np.max(np.abs(mat[np.ix_(rows, rest)]), initial=0.0),
+                   np.max(np.abs(mat[np.ix_(rest, rows)]), initial=0.0))
+        if leak > IRREP_INVARIANCE_TOL:
+            ireps = ', '.join(str(irep) for _, _, irep in blocks)
+            raise ValueError(f'irrep {ireps} of l={shell["l"]} in the {shell["basis"]} basis '
+                             f'is not invariant under symmetry operation {isym + 1} '
+                             f'(mixing {leak:.2g}); correlate the whole shell or use a '
+                             f'basis adapted to the site symmetry')
+
+
 # --- case.indmftpr -----------------------------------------------------------
 
 def read_indmftpr(indmftpr, *, lines=None):

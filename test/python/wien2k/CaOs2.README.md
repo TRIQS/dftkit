@@ -266,6 +266,13 @@ case uses the retained up-channel coefficients as `case.almblm` and checks
 that format, not a new paramagnetic DFT calculation. `CaOs2_fcubic_a2`
 selects only the second mm2 irrep without SO.
 
+An irrep can be selected only if every symmetry operation of the structure
+maps it onto itself; otherwise its symmetry matrices are not unitary and the
+symmetrized local quantities are wrong. On the Os site of CaOs2 this holds
+for the first two mm2 irreps, not for the last two, and the Python generators
+refuse those. Native dmftproj writes them without a warning. On a cubic site
+(Oh) only A2 is invariant.
+
 Using the `ref` function above, also copy the shipped `case.cf_f_mm2` to
 `$WIENROOT/SRC_templates`, then run:
 

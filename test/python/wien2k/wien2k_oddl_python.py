@@ -86,6 +86,34 @@ _check('CaOs2_fcubic_pm', 'CaOs2_noso', all_outputs, paramagnetic=True)
 _check('CaOs2_fcubic_a2', 'CaOs2_noso',
        [('ctqmcout', ctqmcout.write_ctqmcout), ('symqmc', symqmc.write_symqmc)])
 
+
+def _rejects_irrep(selection):
+    """An irrep selection the Os site symmetry mixes with the rest of the f
+    shell must be refused by every generator that writes irrep blocks."""
+    tmp = tempfile.mkdtemp()
+    try:
+        case = os.path.join(tmp, 'case')
+        lines = open(os.path.join(HERE, 'CaOs2_fcubic_a2.indmftpr')).read().splitlines()
+        lines[9] = selection
+        open(case + '.indmftpr', 'w').write('\n'.join(lines) + '\n')
+        for ext in ('struct', 'dmftsym'):
+            shutil.copy(os.path.join(HERE, f'CaOs2.{ext}'), f'{case}.{ext}')
+        for spin in ('up', 'dn'):
+            _gunzip(os.path.join(HERE, f'CaOs2_noso.almblm{spin}.gz'), f'{case}.almblm{spin}')
+        for writer in (ctqmcout.write_ctqmcout, symqmc.write_symqmc):
+            try:
+                writer(case)
+            except ValueError as error:
+                assert 'not invariant' in str(error), error
+            else:
+                raise AssertionError(f'{writer.__name__} accepted f irreps {selection}')
+    finally:
+        shutil.rmtree(tmp)
+
+
+_rejects_irrep('0010')
+_rejects_irrep('0001')
+
 np.testing.assert_allclose(reptrans('cubic', 3) @ reptrans('cubic', 3).conj().T,
                            np.eye(7), atol=1e-14, rtol=0)
 assert basis_dreps('cubic', 3) == [2, 1, 2, 2]
