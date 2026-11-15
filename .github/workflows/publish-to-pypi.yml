@@ -1,11 +1,10 @@
 name: Publish to PyPI
 
 on:
-  # Uncomment the push trigger below to enable automatic publishing to PyPI.
-  # push:
-  #   tags:
-  #     - '[0-9]+.[0-9]+.[0-9]+'
-  #     - '[0-9]+.[0-9]+.[0-9]+rc[0-9]+'
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+rc[0-9]+'
   workflow_dispatch:
 
 jobs:
@@ -13,7 +12,8 @@ jobs:
     name: Build distribution 📦
     runs-on: ubuntu-latest
     container:   # we have to provide a working triqs installation to make the cmake step work
-      image: flatironinstitute/triqs:latest
+      # no flatironinstitute/triqs:unstable image is published; reuse the solid_dmft CI image which ships triqs unstable
+      image: ghcr.io/triqs/solid_dmft_github_ci:unstable
       options: --user root
 
     steps:
