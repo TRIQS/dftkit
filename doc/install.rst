@@ -3,10 +3,23 @@
 .. _install:
 
 Install triqs_dftkit
-*******************
+********************
+
+.. _pypi:
+
+PyPI
+====
+
+We provide a Python package through the `Python Package Index <https://pypi.org/>`_ (PyPI). After :ref:`installing TRIQS <triqslibs:triqs_install>` you can install dftkit with::
+
+        pip install triqs_dftkit
+
+The PyPI package requires a TRIQS installation with a matching major.minor version number. It contains the Python converters and drivers only. The Fortran ``dmftproj`` program of the Wien2k interface is not included; to use it, compile dftkit from source as described below.
+
+See also `pypi.org/project/triqs_dftkit <https://pypi.org/project/triqs_dftkit/>`_.
 
 Compiling triqs_dftkit from source
-===============================
+==================================
 
 .. note:: To guarantee reproducibility in scientific calculations we strongly recommend the use of a stable `release <https://github.com/TRIQS/triqs/releases>`_ of both TRIQS and its applications.
 
@@ -19,9 +32,9 @@ Prerequisites
 Installation steps
 ------------------
 
-#. Download the source code of the latest stable version by cloning the ``TRIQS/triqs_dftkit`` repository from GitHub::
+#. Download the source code of the latest stable version by cloning the ``TRIQS/dftkit`` repository from GitHub::
 
-     $ git clone https://github.com/TRIQS/triqs_dftkit triqs_dftkit.src
+     $ git clone https://github.com/TRIQS/dftkit triqs_dftkit.src
 
 #. Create and move to a new directory where you will compile the code::
 

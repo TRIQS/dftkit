@@ -2,6 +2,31 @@
 
 # Changelog
 
+## Version 4.0.1
+
+dftkit version 4.0.1 is a patch release. It fixes the conversion of Wien2k
+band partial projectors for spin-polarized runs without spin-orbit coupling,
+and is the first dftkit release published on PyPI (`pip install triqs_dftkit`).
+
+We thank all contributors: Christopher Albert, Thomas Hahn, Alexander Hampel, Nils Wentzell
+
+Find below an itemized list of changes in this release.
+
+### Wien2k
+* Read the band partial projectors of spin-polarized runs without spin-orbit coupling in the order native `dmftproj -band` writes them (real parts of both spins, then imaginary parts). `proj_mat_all` in `dft_bands_input` was wrong before for such runs
+
+### VASP
+* Write the SP flag, not the number of spin channels, to `dft_symmcorr_input/SP`. No calculation used the old value
+
+### ghaction
+* Publish to PyPI on release tags, with the workflow of DFTTools
+
+### doc
+* Document the PyPI package in the install instructions; fix the clone URL
+* Add a version switcher flyout and a canonical URL to the sphinx docs
+* Fix the documentation website URLs and add the Zenodo DOI badge to the README
+
+
 ## Version 4.0.0
 
 dftkit version 4.0.0 is the first release of the toolkit and is compatible with
