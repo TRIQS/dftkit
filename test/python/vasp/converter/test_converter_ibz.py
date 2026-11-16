@@ -108,6 +108,20 @@ class TestConverterIBZ(mytest.MyTestCase):
         """
         self.check_ibz('nio_afm', tol=1e-4)
 
+    def test_convert_nio_fcc_ibz(self):
+        """
+        NiO rock salt in the fcc primitive cell (Ni d, 6x6x6 mesh). The lattice
+        matrix is not symmetric, so the Cartesian rotations are only orthogonal if
+        the VASP operations are taken as real-space fractional; the cubic SrVO3 and
+        rhombohedral NiO cells above cannot tell the two conventions apart. On
+        this coarse mesh the full-grid VASP projectors are only symmetric to ~4e-4.
+        """
+        sym = symmetry.read_vasp_symmetry(_rpath + 'nio_fcc/vaspout.h5')
+        self.assertEqual(len(sym['R_cart']), 48)
+        for R in sym['R_cart']:
+            np.testing.assert_allclose(R @ R.T, np.eye(3), atol=1e-12)
+        self.check_ibz('nio_fcc', tol=1e-3)
+
 
     def test_rotation_representation(self):
         """D^l(R) is orthogonal and a representation, D(R1 R2) = D(R1) D(R2)."""

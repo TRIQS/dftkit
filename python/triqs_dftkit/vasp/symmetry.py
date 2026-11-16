@@ -181,7 +181,7 @@ def read_vasp_symmetry(vasp_h5):
         ee = ar['results']['electron_eigenvalues']
         if 'kpoints_symmetry_symop' not in ee:
             return None
-        symop = np.asarray(ee['kpoints_symmetry_symop'])      # (nktot, 3, 3) int, reciprocal-fractional
+        symop = np.asarray(ee['kpoints_symmetry_symop'])      # (nktot, 3, 3) int, real-space fractional
         ibz_weights = np.asarray(ee['kpoints_symmetry_weight'])  # (nkibz,) sum = 1
         n_k_ibz = int(ee['kpoints']) if 'kpoints' in ee else len(ibz_weights)
         ksymmap = np.asarray(ee['kpoints_symmetry_mapping']) - 1  # full grid -> IBZ index
@@ -193,16 +193,21 @@ def read_vasp_symmetry(vasp_h5):
     # type index per ion
     type_of_ion = np.concatenate([[it] * n for it, n in enumerate(number_ion_types)])
 
-    # reciprocal basis (columns = reciprocal vectors): B = 2pi (A^-1)^T, A rows = lattice vectors
-    B = (2 * np.pi * np.linalg.inv(lattice).T).T
-    Binv = np.linalg.inv(B)
+    # The stored operation s acts on real-space fractional coordinates (the IBZ
+    # representative maps as k_full = s^-T k_ibz in reciprocal-fractional
+    # coordinates), so with A the matrix whose rows are the lattice vectors the
+    # Cartesian rotation is R = A^T s A^-T. Treating s as reciprocal-fractional
+    # instead gives a non-orthogonal R whenever A is not symmetric (e.g. the fcc
+    # primitive cell); cubic and symmetric rhombohedral cells hide the difference.
+    AT = lattice.T
+    ATinv = np.linalg.inv(AT)
     # VASP stores, per full-grid k-point, the single operation mapping the IBZ
     # representative to that point (a coset representative). The set of stored
     # operations is therefore complete only if some k-point has a full-size star.
     # On coarse / special meshes it is a proper subset, so we close it under
     # multiplication to recover the full point group (exact: integer matrices).
     uniq = _close_group(np.unique(symop.reshape(-1, 9), axis=0).reshape(-1, 3, 3))
-    R_cart = [B @ s.astype(float) @ Binv for s in uniq]
+    R_cart = [AT @ s.astype(float) @ ATinv for s in uniq]
 
     return dict(n_k_ibz=n_k_ibz, ibz_weights=ibz_weights, ksymmap=ksymmap, R_cart=R_cart,
                 positions=positions, lattice=lattice, type_of_ion=type_of_ion)
