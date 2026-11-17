@@ -413,34 +413,33 @@ class ProjectorShell:
 
         ne = len(emesh)
         dos = np.zeros((ne, ns, nion, nlm))
-        w_k = np.zeros((nk, nb_max, ns, nion, nlm), dtype=complex)
+        # projector weights |P|^2 per k-point and band (band index relative to ib_min)
+        w_k = np.zeros((nk, nb_max, ns, nion, nlm))
         for isp in range(ns):
+            is_b = min(isp, ns_band)
             for ik in range(nk):
-                is_b = min(isp, ns_band)
                 ib1 = self.ib_win[ik, is_b, 0]
                 ib2 = self.ib_win[ik, is_b, 1] + 1
-                for ib_g in range(ib1, ib2):
-                    for io in range(nion):
-# Note the difference between 'ib' and 'ibn':
-#  'ib'  counts from 0 to 'nb_k - 1'
-#  'ibn' counts from 'ib1 - ib_min' to 'ib2 - ib_min'
-                        ib = ib_g - ib1
-                        ibn = ib_g - self.ib_min
-                        proj_k = self.proj_win[io, isp, ik, :, ib]
-                        w_k[ik, ib, isp, io, :] = proj_k * proj_k.conj()
+                nb_k = ib2 - ib1
+                # proj_win[io, isp, ik, :, ib] with 'ib' counting from 0 to 'nb_k - 1'
+                proj_k = self.proj_win[:, isp, ik, :, :nb_k]
+                w_k[ik, :nb_k, isp] = (proj_k * proj_k.conj()).real.transpose(2, 0, 1)
 
-#        eigv_ef = el_struct.eigvals[ik, ib, isp] - el_struct.efermi
         itt = el_struct.kmesh['itet'].T.copy()
 # k-indices are starting from 0 in Python
         itt[1:, :] -= 1
+        n_tetra = itt.shape[1]
+        # energies per batch, so that the (energies, corners, tetrahedra) weight array
+        # and its temporaries stay at a few tens of MB also for large k meshes
+        ne_batch = max(1, 250000 // n_tetra)
         for isp in range(ns):
             for ib, eigk in enumerate(el_struct.eigvals[:, self.ib_min:self.ib_max+1, isp].T):
-                for ie, e in enumerate(emesh):
-                    eigk_ef = eigk - el_struct.efermi
-                    cti = dos_tetra_weights_3d(eigk_ef, e, itt)
-                    for im in range(nlm):
-                        for io in range(nion):
-                            dos[ie, isp, io, im] += np.sum((cti * w_k[itt[1:, :], ib, isp, io, im].real).sum(0) * itt[0, :])
+                eigk_ef = eigk - el_struct.efermi
+                # corner projector weights times tetrahedron multiplicity: (4, n_tetra, nion, nlm)
+                w_corner = w_k[itt[1:, :], ib, isp] * itt[0, :, None, None]
+                for ie0 in range(0, ne, ne_batch):
+                    cti = dos_tetra_weights_3d(eigk_ef, emesh[ie0:ie0 + ne_batch], itt)
+                    dos[ie0:ie0 + ne_batch, isp] += np.einsum('ect,ctom->eom', cti, w_corner)
 
         dos *= 2 * el_struct.kmesh['volt']
 #        for isp in range(ns):
