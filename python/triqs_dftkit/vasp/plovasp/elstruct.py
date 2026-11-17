@@ -72,6 +72,9 @@ class ElectronicStructure:
             self.kmesh['volt'] = vasp_data.kpoints.volt
         except AttributeError:
             pass
+        # map full-grid k-point -> IBZ k-point (0-based); only present for vaspout.h5 input,
+        # where eigenvalues and projectors are on the full grid but the tetrahedra on the IBZ
+        self.kmesh['ksymmap'] = getattr(vasp_data.kpoints, 'ksymmap', None)
 
 # Note that one should not subtract this Fermi level from eigenvalues
 # here because the true Fermi level might be provided by conf-file
