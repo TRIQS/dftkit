@@ -103,46 +103,53 @@ def dos_tetra_weights_3d(eigenvalues, energy, k_points):
     """
     Compute tetrahedron corner weights for 3D DOS integration.
 
-    This version is fully vectorized in NumPy, operating on all tetrahedra
-    simultaneously without MPI or Python loops.
+    Vectorized in NumPy over all tetrahedra and, if an array of energies is
+    given, over all energies.
 
     Parameters
     ----------
     eigenvalues : (n_kpoints,) array_like of float
         Energies at k-points.
-    energy : float
-        Target energy for DOS evaluation.
+    energy : float or (n_energies,) array_like of float
+        Target energy or energies for DOS evaluation.
     k_points : (5, n_tetra) array_like of int
         Tetrahedron connectivity. Only rows [1:5] are used for corner indices.
 
     Returns
     -------
-    corner_weights : (4, n_tetra) ndarray of float
-        Corner weights for each tetrahedron at the specified energy.
+    corner_weights : (4, n_tetra) ndarray of float, or (n_energies, 4, n_tetra) for an array of energies
+        Corner weights for each tetrahedron at the specified energy (energies).
     """
     eigk = np.asarray(eigenvalues, dtype=float)
     tetra = np.asarray(k_points, dtype=np.int64)
     if tetra.ndim != 2 or tetra.shape[0] != 5:
         raise ValueError("k_points must have shape (5, n_tetra)")
 
+    scalar_energy = np.ndim(energy) == 0
+    energies = np.atleast_1d(np.asarray(energy, dtype=float))
+    n_energy = len(energies)
+
     n_tetra = tetra.shape[1]
     corners = tetra[1:5, :]  # (4, n_tetra)
     corner_energies = eigk[corners]
 
-    # Sort each tetrahedron's corner energies ascending
+    # Sort each tetrahedron's corner energies ascending (independent of the energy)
     order = np.argsort(corner_energies, axis=0)
     sorted_energies = np.take_along_axis(corner_energies, order, axis=0)
 
-    e1, e2, e3, e4 = sorted_energies
-    e_eval = float(energy)
+    # broadcast to (n_energy, n_tetra) and flatten: one entry per (energy, tetrahedron) pair
+    e1, e2, e3, e4 = (np.broadcast_to(e, (n_energy, n_tetra)).ravel() for e in sorted_energies)
+    e_eval = np.repeat(energies, n_tetra)
 
-    # Determine which energy range each tetrahedron falls into
+    # Determine which energy range each tetrahedron falls into. The ranges share
+    # their boundaries; the cases below are applied in this order, a later one
+    # overwriting an earlier one at a shared boundary.
     flag_uniform = (e1 <= e_eval) & (e_eval <= e4) & (np.abs(e4 - e1) < _TOL)
     flag_case1 = (e1 <= e_eval) & (e_eval <= e2) & (~flag_uniform)
     flag_case2 = (e2 <= e_eval) & (e_eval <= e3)
     flag_case3 = (e3 <= e_eval) & (e_eval <= e4)
 
-    weights_sorted = np.zeros_like(sorted_energies, dtype=float)
+    weights_sorted = np.zeros((4, n_energy * n_tetra), dtype=float)
     idx = lambda mask: np.nonzero(mask)[0]
 
     # === Case 6: uniform tetrahedra (degenerate energies)
@@ -151,8 +158,7 @@ def dos_tetra_weights_3d(eigenvalues, energy, k_points):
 
     # === Case 1
     if flag_case1.any():
-        i, (ge1, ge2, ge3, ge4) = _select(flag_case1, e1, e2, e3, e4)
-        ee = e_eval
+        i, (ge1, ge2, ge3, ge4, ee) = _select(flag_case1, e1, e2, e3, e4, e_eval)
 
         w0 = (_stable_fraction_K2(ee, ge1, ge2, ge4) * _stable_fraction_F(ee, ge2, ge1, ge1, ge3)
               + _stable_fraction_K2(ee, ge1, ge2, ge3) * _stable_fraction_F(ee, ge3, ge1, ge1, ge4)
@@ -164,8 +170,7 @@ def dos_tetra_weights_3d(eigenvalues, energy, k_points):
 
     # === Case 2
     if flag_case2.any():
-        i, (ge1, ge2, ge3, ge4) = _select(flag_case2, e1, e2, e3, e4)
-        ee = e_eval
+        i, (ge1, ge2, ge3, ge4, ee) = _select(flag_case2, e1, e2, e3, e4, e_eval)
 
         w0 = 0.5 * (
             _stable_fraction_K1(ee, ge3, ge1)
@@ -215,8 +220,7 @@ def dos_tetra_weights_3d(eigenvalues, energy, k_points):
 
     # === Case 3
     if flag_case3.any():
-        i, (ge1, ge2, ge3, ge4) = _select(flag_case3, e1, e2, e3, e4)
-        ee = e_eval
+        i, (ge1, ge2, ge3, ge4, ee) = _select(flag_case3, e1, e2, e3, e4, e_eval)
 
         w0 = _stable_fraction_K1(ee, ge4, ge1) * _stable_fraction_F(ee, ge4, ge4, ge2, ge3)
         w1 = _stable_fraction_K1(ee, ge4, ge2) * _stable_fraction_F(ee, ge4, ge4, ge1, ge3)
@@ -230,7 +234,8 @@ def dos_tetra_weights_3d(eigenvalues, energy, k_points):
         weights_sorted[:, i] = np.vstack([w0, w1, w2, w3])
 
     # === Remap to original corner order
-    corner_weights = np.zeros_like(corner_energies, dtype=float)
-    corner_weights[order, np.arange(n_tetra)[None, :]] = weights_sorted
+    weights_sorted = weights_sorted.reshape(4, n_energy, n_tetra).transpose(1, 0, 2)
+    corner_weights = np.zeros((n_energy, 4, n_tetra), dtype=float)
+    np.put_along_axis(corner_weights, np.broadcast_to(order, (n_energy, 4, n_tetra)), weights_sorted, axis=1)
 
-    return corner_weights
+    return corner_weights[0] if scalar_energy else corner_weights
