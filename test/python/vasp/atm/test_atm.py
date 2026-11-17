@@ -35,4 +35,20 @@ class TestProjectorShell(mytest.MyTestCase):
 
         self.assertEqual(res, r_should)
 
+# Scenario 2
+    def test_energy_array(self):
+        rng = np.random.default_rng(1)
+        n_k, n_tetra = 30, 200
+        eigs = rng.normal(size=n_k)
+        eigs[:6] = 0.3   # degenerate corners: uniform and regularized branches
+        itt = np.vstack([rng.integers(1, 7, n_tetra), rng.integers(0, n_k, (4, n_tetra))])
+        itt[1:, :10] = rng.integers(0, 6, (4, 10))
+        # include energies exactly at corner values, where the cases share boundaries
+        energies = np.concatenate([np.linspace(-3, 3, 101), eigs[:15]])
 
+        res = dos_tetra_weights_3d(eigs, energies, itt)
+        res_single = np.array([dos_tetra_weights_3d(eigs, en, itt) for en in energies])
+
+        self.assertEqual(res.shape, (len(energies), 4, n_tetra))
+        self.assertEqual(dos_tetra_weights_3d(eigs, 0.1, itt).shape, (4, n_tetra))
+        self.assertTrue(np.array_equal(res, res_single))

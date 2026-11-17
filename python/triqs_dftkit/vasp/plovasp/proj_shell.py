@@ -414,6 +414,9 @@ class ProjectorShell:
         ne = len(emesh)
         dos = np.zeros((ne, ns, nion, nlm))
         # projector weights |P|^2 per k-point and band (band index relative to ib_min)
+        # projector weights |P|^2 per k-point and band. The band index of w_k counts from
+        # ib_min, as for the eigenvalues below, while the one of proj_win counts from the
+        # first band ib1 of the window at the given k-point.
         w_k = np.zeros((nk, nb_max, ns, nion, nlm))
         for isp in range(ns):
             is_b = min(isp, ns_band)
@@ -421,9 +424,24 @@ class ProjectorShell:
                 ib1 = self.ib_win[ik, is_b, 0]
                 ib2 = self.ib_win[ik, is_b, 1] + 1
                 nb_k = ib2 - ib1
-                # proj_win[io, isp, ik, :, ib] with 'ib' counting from 0 to 'nb_k - 1'
+                ibn1 = ib1 - self.ib_min
                 proj_k = self.proj_win[:, isp, ik, :, :nb_k]
-                w_k[ik, :nb_k, isp] = (proj_k * proj_k.conj()).real.transpose(2, 0, 1)
+                w_k[ik, ibn1:ibn1 + nb_k, isp] = (proj_k * proj_k.conj()).real.transpose(2, 0, 1)
+
+        eigvals = el_struct.eigvals[:, self.ib_min:self.ib_max+1, :]
+        # With symmetry (vaspout.h5 input) eigenvalues and projectors are on the full grid,
+        # but the tetrahedra refer to the IBZ k-points. All k-points of a star share the
+        # eigenvalues, while the orbital weights are only symmetric after the average over
+        # the star, so average them and take the eigenvalues of one member of each star.
+        ksymmap = el_struct.kmesh.get('ksymmap')
+        if ksymmap is not None and nk > el_struct.kmesh['nkibz']:
+            nkibz = el_struct.kmesh['nkibz']
+            star_size = np.bincount(ksymmap, minlength=nkibz)
+            w_ibz = np.zeros((nkibz,) + w_k.shape[1:])
+            np.add.at(w_ibz, ksymmap, w_k)
+            w_k = w_ibz / star_size[:, None, None, None, None]
+            first_in_star = np.unique(ksymmap, return_index=True)[1]
+            eigvals = eigvals[first_in_star]
 
         itt = el_struct.kmesh['itet'].T.copy()
 # k-indices are starting from 0 in Python
@@ -433,7 +451,7 @@ class ProjectorShell:
         # and its temporaries stay at a few tens of MB also for large k meshes
         ne_batch = max(1, 250000 // n_tetra)
         for isp in range(ns):
-            for ib, eigk in enumerate(el_struct.eigvals[:, self.ib_min:self.ib_max+1, isp].T):
+            for ib, eigk in enumerate(eigvals[:, :, isp].T):
                 eigk_ef = eigk - el_struct.efermi
                 # corner projector weights times tetrahedron multiplicity: (4, n_tetra, nion, nlm)
                 w_corner = w_k[itt[1:, :], ib, isp] * itt[0, :, None, None]
