@@ -1,5 +1,6 @@
 r"""
-Tests of ProjectorShell.density_of_states on small synthetic inputs.
+Tests of ProjectorShell.density_of_states, density_matrix and local_hamiltonian
+on small synthetic inputs.
 """
 from types import SimpleNamespace
 
@@ -88,3 +89,35 @@ class TestDensityOfStates(mytest.MyTestCase):
         self.assertTrue(np.allclose(dos[:, 0], dos[:, 1]))
         self.assertTrue(np.allclose(dos[:, 0] + dos[:, 1], dos_ref))
         self.assertTrue(integrate(dos_ref, EMESH < 0) > 0.0)
+
+
+class TestWindowBandIndex(mytest.MyTestCase):
+    """
+    Scenario:
+    - the band window starts at different bands at different k-points: density matrix and
+      local Hamiltonian pair each projector with its own band (proj_win counts from ib1)
+    """
+
+    def test_density_matrix_and_local_hamiltonian(self):
+        # band 0 (occupied) is in the window at k-points 0 and 1 only; the projector
+        # is on band 1 (empty) everywhere
+        nk = 4
+        ib_win = np.array([[[0, 1]], [[0, 1]], [[1, 1]], [[1, 1]]])
+        proj_win = np.zeros((1, 1, nk, 1, 2), dtype=complex)
+        proj_win[0, 0, :2, 0, 1] = 1.0
+        proj_win[0, 0, 2:, 0, 0] = 1.0
+        shell = make_shell(proj_win, ib_win, ib_min=0, ib_max=1)
+        shell.nc_flag = False
+
+        el_struct = make_el_struct(EIGS, nkibz=nk)
+        el_struct.kmesh['kweights'] = np.full(nk, 1.0 / nk)
+        el_struct.ferw = np.zeros((1, nk, 2))
+        el_struct.ferw[0, :, 0] = 1.0
+
+        occ, overlap = shell.density_matrix(el_struct)
+        loc_ham = shell.local_hamiltonian(el_struct)
+
+        self.assertTrue(np.allclose(occ, 0.0))
+        self.assertTrue(np.allclose(overlap, 1.0))
+        self.assertTrue(np.allclose(loc_ham, EIGS[:, 1].mean()))
+
