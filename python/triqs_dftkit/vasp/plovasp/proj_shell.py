@@ -299,6 +299,14 @@ class ProjectorShell:
 # density_matrix
 #
 ################################################################################
+    def _window_bands(self, isp, ik):
+        """
+        Band range [ib1, ib2) of the window at k-point ik. The band index of proj_win
+        counts from ib1, i.e. proj_win[..., ib] belongs to band ib1 + ib.
+        """
+        is_b = min(isp, self.ib_win.shape[1] - 1)
+        return self.ib_win[ik, is_b, 0], self.ib_win[ik, is_b, 1] + 1
+
     def density_matrix(self, el_struct, site_diag=True, spin_diag=True):
         """
         Returns occupation matrix/matrices for the shell.
@@ -319,16 +327,15 @@ class ProjectorShell:
 #        self.proj_win = np.zeros((nion, ns, nk, nlm, nb_max), dtype=complex)
         kweights = el_struct.kmesh['kweights']
         occnums = el_struct.ferw
-        ib1 = self.ib_min
-        ib2 = self.ib_max + 1
         # VASP.6.
         count_nan = 0
         print("Site diag : {}".format(site_diag))
         if site_diag:
             for isp in range(ns):
                 for ik, weight, occ in zip(it.count(), kweights, occnums[isp, :, :]):
+                    ib1, ib2 = self._window_bands(isp, ik)
                     for io in range(nion):
-                        proj_k = self.proj_win[io, isp, ik, ...]
+                        proj_k = self.proj_win[io, isp, ik, :, :ib2 - ib1]
                         # VASP.6.
                         array_sum = np.sum(proj_k)
                         if np.isnan(array_sum) == True:
@@ -345,13 +352,14 @@ class ProjectorShell:
             proj_k = np.zeros((ndim, nbtot), dtype=complex)
             for isp in range(ns):
                 for ik, weight, occ in zip(it.count(), kweights, occnums[isp, :, :]):
+                    ib1, ib2 = self._window_bands(isp, ik)
                     for io in range(nion):
                         i1 = io * nlm
                         i2 = (io + 1) * nlm
                         proj_k[i1:i2, :] = self.proj_win[io, isp, ik, ...]
                     # TODO
-                    occ_mats[isp, 0, :, :] += np.dot(proj_k * occ[ib1:ib2],
-                                                 proj_k.conj().T).real * weight
+                    occ_mats[isp, 0, :, :] += np.dot(proj_k[:, :ib2 - ib1] * occ[ib1:ib2],
+                                                 proj_k[:, :ib2 - ib1].conj().T).real * weight
                     overlaps[isp, 0, :, :] += np.dot(proj_k,proj_k.conj().T).real * weight
 
 
@@ -375,14 +383,12 @@ class ProjectorShell:
 
 #        self.proj_win = np.zeros((nion, ns, nk, nlm, nb_max), dtype=complex)
         kweights = el_struct.kmesh['kweights']
-        occnums = el_struct.ferw
-        ib1 = self.ib_min
-        ib2 = self.ib_max + 1
         for isp in range(ns):
-            for ik, weight, occ, eigk in zip(it.count(), kweights, occnums[isp, :, :],
-                                          el_struct.eigvals[:, ib1:ib2, isp]):
+            for ik, weight in zip(it.count(), kweights):
+                ib1, ib2 = self._window_bands(isp, ik)
+                eigk = el_struct.eigvals[ik, ib1:ib2, isp]
                 for io in range(nion):
-                    proj_k = self.proj_win[io, isp, ik, ...]
+                    proj_k = self.proj_win[io, isp, ik, :, :ib2 - ib1]
                     # VASP.6.
                     if self.nc_flag == True:
                         loc_ham[isp, io, :, :] += np.dot(proj_k * (eigk - el_struct.efermi),
