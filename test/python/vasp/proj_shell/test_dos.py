@@ -31,7 +31,8 @@ def make_el_struct(eigs, nkibz, ksymmap=None):
 
 
 def integrate(dos, mask):
-    return np.trapezoid(dos[mask], EMESH[mask], axis=0)
+    # rectangle rule (np.trapezoid needs numpy >= 2); only signs are compared
+    return dos[mask].sum(axis=0) * (EMESH[1] - EMESH[0])
 
 
 class TestDensityOfStates(mytest.MyTestCase):
