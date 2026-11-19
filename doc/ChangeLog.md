@@ -9,6 +9,9 @@
 * PLOVASP: pair the projectors with the right bands in the density matrix and local Hamiltonian printed during PLO generation when the band window starts at different bands at different k-points (energy window without `BANDS`). The printed occupations were wrong in that case (NiO with `EWINDOW = -7 10`: d-shell trace 9.20 instead of 8.50); the PLOs written for DFTTools were not affected
 * PLOVASP projected DOS: evaluate the tetrahedron weights for many energies at once (`dos_tetra_weights_3d` accepts an array of energies), about 5x faster PLO generation with `DOSMESH`
 
+### Wien2k
+* dmftproj: build the complex phases and spin rotations in double precision (`CMPLX(..., KIND=8)` / `DCMPLX`) and store the 1/sqrt(2) entries of the shipped `case.cf_p_cubic` and `case.cf_f_mm2` templates to full precision. The symmetry matrices in `case.symqmc` were unitary only to about 1e-7; they are now unitary to machine precision, so native output changes at that level
+
 
 ## Version 4.0.1
 
