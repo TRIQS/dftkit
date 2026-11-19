@@ -2,6 +2,14 @@
 
 # Changelog
 
+## Version 4.0.2
+
+### VASP
+* PLOVASP projected DOS (`DOSMESH`): fix the orbital-resolved DOS. With symmetry (`vaspout.h5` input) the tetrahedra refer to the IBZ k-points while the projectors are on the full grid; the DOS used the projector weights of one k-point per star only, which broke the degeneracy of symmetry-equivalent orbitals (e.g. t2g / eg of NiO). The weights are now averaged over the star. Also pair the projector weights with the right band when the band window starts at different bands at different k-points (energy window without `BANDS`). The total DOS of a shell and the PLOs written for DFTTools are unchanged
+* PLOVASP: pair the projectors with the right bands in the density matrix and local Hamiltonian printed during PLO generation when the band window starts at different bands at different k-points (energy window without `BANDS`). The printed occupations were wrong in that case (NiO with `EWINDOW = -7 10`: d-shell trace 9.20 instead of 8.50); the PLOs written for DFTTools were not affected
+* PLOVASP projected DOS: evaluate the tetrahedron weights for many energies at once (`dos_tetra_weights_3d` accepts an array of energies), about 5x faster PLO generation with `DOSMESH`
+
+
 ## Version 4.0.1
 
 dftkit version 4.0.1 is a patch release. It fixes the conversion of Wien2k
