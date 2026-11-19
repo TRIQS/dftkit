@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+
+"""Compatibility command for the pure-Python Wien2k projector driver."""
+
+from triqs_dftkit.wien2k.dmftproj import main
+
+
+if __name__ == '__main__':
+    main()

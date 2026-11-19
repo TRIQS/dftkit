@@ -1,15 +1,13 @@
-# List the sources
-set(SOURCES modules.f dmftproj.f readcomline.f set_ang_trans.f setsym.f 
-            set_rotloc.f timeinv.f read_k_list.f set_projections.f orthogonal.f 
-            rot_projectmat.f density.f symmetrize_mat.f rot_dens.f
-            orthogonal_wannier.f outputqmc.f outbwin.f outband.f)
-
-# The main target and what to link with...
-add_executable(dmftproj ${SOURCES})
-target_link_libraries(dmftproj nda::blas_lapack)
-
-# where to install
-install (TARGETS dmftproj DESTINATION bin)
+# Native reference executable, built only with Build_dmftproj_fortran and not
+# installed. Its tests use $<TARGET_FILE:dmftproj>.
+if(Build_dmftproj_fortran)
+  set(SOURCES modules.f dmftproj.f readcomline.f set_ang_trans.f setsym.f
+              set_rotloc.f timeinv.f read_k_list.f set_projections.f orthogonal.f
+              rot_projectmat.f density.f symmetrize_mat.f rot_dens.f
+              orthogonal_wannier.f outputqmc.f outbwin.f outband.f)
+  add_executable(dmftproj ${SOURCES})
+  target_link_libraries(dmftproj nda::blas_lapack)
+endif()
 
 # install wien2k files
 SET(D ${CMAKE_CURRENT_SOURCE_DIR}/SRC_templates/)

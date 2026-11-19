@@ -24,7 +24,7 @@ cmake_policy(VERSION ${CMAKE_VERSION})
 
 # ############
 # Define Project
-project(triqs_dftkit VERSION 4.0.0 LANGUAGES CXX Fortran)
+project(triqs_dftkit VERSION 4.0.0 LANGUAGES CXX)
 get_directory_property(IS_SUBPROJECT PARENT_DIRECTORY)
 
 # version displayed in the documentation
@@ -97,6 +97,14 @@ endif()
 # Build a Debian package
 option(BUILD_DEBIAN_PACKAGE "Build a deb package" OFF)
 
+# The native Fortran dmftproj is kept as a reference implementation for the
+# Python port. It is built only on request and never installed: the installed
+# dmftproj command is the Python one from bin/.
+option(Build_dmftproj_fortran "Build the native Fortran dmftproj as a test reference" OFF)
+if(Build_dmftproj_fortran)
+  enable_language(Fortran)
+endif()
+
 # Provide GNU Installation directories
 include(GNUInstallDirs)
 
@@ -106,7 +114,7 @@ include(GNUInstallDirs)
 # Find / Build dependencies
 add_subdirectory(deps)
 
-# Build and install the dmftproj executable
+# Wien2k SRC_templates, and with Build_dmftproj_fortran the native reference executable
 add_subdirectory(fortran/dmftproj)
 
 # Command line scripts (init_dmftpr generates dmftproj's input file)

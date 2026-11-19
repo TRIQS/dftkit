@@ -15,6 +15,8 @@ this section to the version number when the next release is cut.
 * PLOVASP projected DOS: evaluate the tetrahedron weights for many energies at once (`dos_tetra_weights_3d` accepts an array of energies), about 5x faster PLO generation with `DOSMESH`
 
 ### Wien2k
+* Replace the Fortran `dmftproj` with a Python port in `triqs_dftkit.wien2k`. `run_dmftproj(case)` writes `case.ctqmcout`, `case.symqmc`, `case.sympar`, `case.parproj` and `case.oubwin{,up,dn}`, and with `band=True` `case.outband`; for the supported inputs the outputs agree with the Fortran code to machine precision. The installed `dmftproj` command runs the port with the Fortran command line (`-sp`, `-so`, `-band`; case name from the working directory) and refuses flags that disagree with the inputs. The Wien2k `Driver` calls the port in process; `dmftproj_exe` still selects an external executable
+* The Fortran `dmftproj` source is kept as a reference and built only with `-DBuild_dmftproj_fortran=ON`; it is no longer installed, and the default build needs no Fortran compiler
 * Support non-spin-orbit band projectors in the Python `case.outband` generator, including independent spin windows; correct the spin ordering when converting their partial projectors and read wrapped atom permutations from Wien2k symmetry files
 * Support band-index projection modes 1 and 2 in the Python `case.outband` generator
 * Use independent selected and below-window bands for ordinary non-spin-orbit projector generation in each spin channel

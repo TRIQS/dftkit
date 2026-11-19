@@ -15,7 +15,6 @@ Here, we project onto the V-t2g shell in a wide energy window (-10 eV to +10 eV)
 ## Prerequisites
 
 * Wien2k, with `WIENROOT` set and `$WIENROOT/x` on disk
-* `dmftproj` on `$PATH` (built and installed by this package)
 * `triqs_modest`, and an impurity solver — the script uses `triqs_cthyb`
 
 ## Running it

@@ -19,7 +19,7 @@ converters turning the output of various DFT codes into the TRIQS-compatible HDF
 format required for DFT+DMFT calculations. Supported codes include
 `Elk <https://elk.sourceforge.io/>`_,
 `VASP <https://www.vasp.at>`_ (with the PLOVasp projection tools),
-`Wien2k <http://www.wien2k.at>`_ (with the ``dmftproj`` executable),
+`Wien2k <http://www.wien2k.at>`_ (with the ``dmftproj`` projector generator),
 `Quantum Espresso <https://www.quantum-espresso.org/>`_,
 `Wannier90 <http://www.wannier.org/>`_ and generic tight-binding Hamiltonians.
 It provides a modern, modular successor to the converters historically shipped with

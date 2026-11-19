@@ -11,7 +11,7 @@ DFT converters for [TRIQS](https://triqs.github.io), enabling DFT+DMFT calculati
 |-----------|-------------|
 | **Elk** | Elk all-electron DFT code |
 | **VASP** | Vienna Ab initio Simulation Package (includes PLOVasp tools) |
-| **Wien2k** | Wien2k LAPW code (includes dmftproj Fortran executable) |
+| **Wien2k** | Wien2k LAPW code (includes the dmftproj projector generator, in Python) |
 | **Wannier90** | Wannier tight-binding models |
 | **Quantum Espresso** | QE plane-wave DFT code |
 | **H(k)** | General tight-binding Hamiltonians |
