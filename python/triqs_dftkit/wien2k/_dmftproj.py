@@ -113,6 +113,16 @@ _CUBIC = {
         [0, 2 ** -0.5, 0, -(2 ** -0.5), 0],
         [0, 2 ** -0.5, 0, 2 ** -0.5, 0],
     ], dtype=complex),
+    # Wien2k's cubic option uses the mm2 f basis in case.cf_f_mm2.
+    3: np.array([
+        [0, 0, 0, 1, 0, 0, 0],
+        [0, 2 ** -0.5, 0, 0, 0, 2 ** -0.5, 0],
+        [0, -1j * 2 ** -0.5, 0, 0, 0, 1j * 2 ** -0.5, 0],
+        [-1j * 2 ** -0.5, 0, 0, 0, 0, 0, -1j * 2 ** -0.5],
+        [0, 0, -1j * 2 ** -0.5, 0, -1j * 2 ** -0.5, 0, 0],
+        [2 ** -0.5, 0, 0, 0, 0, 0, -2 ** -0.5],
+        [0, 0, 2 ** -0.5, 0, -2 ** -0.5, 0, 0],
+    ], dtype=complex),
 }
 
 
@@ -122,7 +132,7 @@ def reptrans(basis, l):
     if basis == 'cubic' and l in _CUBIC:
         return _CUBIC[l]
     if basis == 'cubic' and l != 0:
-        raise NotImplementedError('cubic f harmonics are not implemented yet')
+        raise NotImplementedError(f'cubic harmonics for l={l} are not implemented')
     return _COMPLEX[l]
 
 
@@ -415,7 +425,7 @@ def build_orbs(info):
 
 # --- irreducible representations -------------------------------------------
 
-_CUBIC_DREPS = {1: [3], 2: [2, 3]}
+_CUBIC_DREPS = {1: [3], 2: [2, 3], 3: [2, 1, 2, 2]}
 
 
 def _read_correps(line, nreps):
@@ -489,6 +499,41 @@ def irrep_blocks(sortinfo, l, mixing, ifSO, dreps):
 def block_rows(blocks):
     """Row indices of the selected irrep blocks, in order."""
     return np.concatenate([np.arange(off, off + d) for off, d, _ in blocks])
+
+
+def symmetry_timeinv(op, ifSO):
+    """Time-reversal flag of a symmetry operation: set under spin-orbit
+    coupling for the operations that flip the magnetization (setsym.f)."""
+    k = op['krotm']
+    return int(ifSO and k[0, 0] * k[1, 1] - k[0, 1] * k[1, 0] < 0.0)
+
+
+IRREP_INVARIANCE_TOL = 1e-6
+
+
+def check_irrep_invariance(ops, shell, ifSO):
+    """Raise ValueError if a symmetry operation mixes the selected irrep rows
+    of shell (dict with l, P, mixing, blocks) with the other rows of its
+    basis. Only an invariant selection has unitary symmetry matrices and
+    closed projectors; a basis whose irreps belong to a higher symmetry than
+    the site (e.g. the cubic f irreps of point group mm2 on an Oh site) does
+    not. A shell without irrep selection always passes."""
+    blocks = shell.get('blocks')
+    if blocks is None:
+        return
+    rows = block_rows(blocks)
+    n = shell['P'].shape[0]
+    rest = np.setdiff1d(np.arange(n), rows)
+    for isym, op in enumerate(ops):
+        mat = shell_matrix(op, shell, symmetry_timeinv(op, ifSO), ifSO)
+        leak = max(np.max(np.abs(mat[np.ix_(rows, rest)]), initial=0.0),
+                   np.max(np.abs(mat[np.ix_(rest, rows)]), initial=0.0))
+        if leak > IRREP_INVARIANCE_TOL:
+            ireps = ', '.join(str(irep) for _, _, irep in blocks)
+            raise ValueError(f'irrep {ireps} of l={shell["l"]} in the {shell["basis"]} basis '
+                             f'is not invariant under symmetry operation {isym + 1} '
+                             f'(mixing {leak:.2g}); correlate the whole shell or use a '
+                             f'basis adapted to the site symmetry')
 
 
 # --- case.indmftpr -----------------------------------------------------------

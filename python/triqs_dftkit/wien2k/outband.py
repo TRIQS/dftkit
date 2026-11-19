@@ -157,7 +157,7 @@ def write_outband(case):
             transmats[key], mixing[key] = reptrans(o['basis'], o['l']), False
     if not ifSO and any(mixing.values()):
         raise NotImplementedError('spin-mixing bases require spin-orbit coupling')
-    _select_irreps(crorbs, info, mixing, ifSO)
+    _select_irreps(crorbs, info, mixing, ifSO, ops, transmats)
 
     # rot_projectmat local rotation: the op mapping the sort representative onto
     # this atom (set_projections.f via rot_projectmat). Same as ctqmcout/parproj.

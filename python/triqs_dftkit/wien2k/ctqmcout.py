@@ -65,7 +65,7 @@ from scipy.linalg.lapack import zheev
 from scipy.linalg.blas import zgemm
 
 from ._dmftproj import (build_orbs as _build_orbs, projector_windows, dmat, fmt_scalar, read_almblm,
-                        basis_dreps, block_rows, irrep_blocks,
+                        basis_dreps, block_rows, check_irrep_invariance, irrep_blocks,
                         read_dmftsym, read_fromfile, read_indmftpr, reptrans,
                         rotloc_orbital, rotloc_rotl_so,
                         tmat, write_row)
@@ -105,11 +105,13 @@ def _build_crorbs(info):
     return crorbs
 
 
-def _select_irreps(crorbs, info, mixing, ifSO):
+def _select_irreps(crorbs, info, mixing, ifSO, ops, transmats):
     """Attach the correlated irreps to each crorb: `blocks` (offset, dim,
     irep) of the written rows, `rows` their indices, `split` whether the
     shell is written per irep, and `dreps` the irrep dimensions of the
-    basis. A shell without selection is one block over all its rows."""
+    basis. A shell without selection is one block over all its rows.
+    Raises ValueError for a selection the symmetry operations do not leave
+    invariant."""
     for cr in crorbs:
         l, sort = cr['l'], cr['sort']
         sortinfo = info['sorts'][sort - 1]
@@ -118,6 +120,9 @@ def _select_irreps(crorbs, info, mixing, ifSO):
         if l > 0 and l in sortinfo['correps']:
             dreps = basis_dreps(cr['basis'], l, sortinfo['sourcefile'])
         blocks = irrep_blocks(sortinfo, l, ismix, ifSO, dreps)
+        if blocks is not None and cr['first']:
+            check_irrep_invariance(ops, dict(l=l, basis=cr['basis'], P=transmats[(l, sort)],
+                                             mixing=ismix, blocks=blocks), ifSO)
         cr['split'] = blocks is not None
         cr['dreps'] = dreps
         if blocks is None:
@@ -228,7 +233,7 @@ def write_ctqmcout(case):
             transmats[key], mixing[key] = reptrans(cr['basis'], cr['l']), False
     if not ifSO and any(mixing.values()):
         raise NotImplementedError('spin-mixing bases require spin-orbit coupling')
-    _select_irreps(crorbs, info, mixing, ifSO)
+    _select_irreps(crorbs, info, mixing, ifSO, ops, transmats)
 
     # rotloc Euler angles per crorb: the symmetry op mapping the representative
     # atom of the sort onto this atom (set_rotloc.f). With identity struct
